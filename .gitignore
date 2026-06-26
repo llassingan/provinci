@@ -1,0 +1,39 @@
+# OpenCode — contains secrets/tokens
+opencode.json
+
+# Environment
+.env
+.env.*
+!.env.example
+
+# Terraform
+**/.terraform/
+*.tfstate
+*.tfstate.*
+terraform.tfvars
+!terraform/terraform.tfvars.example
+
+# Go
+*.exe
+*.test
+*.out
+vendor/
+
+# Build
+dist/
+build/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+.opencode
+.sisyphus
+backlog.md
+vps-store-poc.md
