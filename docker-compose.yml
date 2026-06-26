@@ -5,6 +5,7 @@ services:
       - "10000:10000"
     environment:
       - DB_ENCRYPTION_KEY=${DB_ENCRYPTION_KEY}
+      - CORS_ORIGINS=${CORS_ORIGINS:-http://localhost:10001}
     volumes:
       - ./data:/app/data
       - terraform-state:/app/terraform
