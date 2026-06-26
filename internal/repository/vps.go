@@ -17,11 +17,11 @@ func NewVPSRepository(db *sql.DB) *VPSRepository {
 }
 
 func (r *VPSRepository) Create(ctx context.Context, vps *model.VPS) (*model.VPS, error) {
-	query := `INSERT INTO vps (display_name, template_id, shape, ocpu, memory_gb, boot_volume_size_gb, status)
-		VALUES (?, ?, ?, ?, ?, ?, ?)`
+	query := `INSERT INTO vps (display_name, template_id, network_id, shape, ocpu, memory_gb, boot_volume_size_gb, status)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
 
 	result, err := r.db.ExecContext(ctx, query,
-		vps.DisplayName, vps.TemplateID, vps.Shape,
+		vps.DisplayName, vps.TemplateID, vps.NetworkID, vps.Shape,
 		vps.OCPU, vps.MemoryGB, vps.BootVolumeSizeGB,
 		vps.Status,
 	)
@@ -43,12 +43,12 @@ func (r *VPSRepository) List(ctx context.Context, status string) ([]model.VPS, e
 
 	if status != "" {
 		rows, err = r.db.QueryContext(ctx,
-			`SELECT id, display_name, template_id, shape, ocpu, memory_gb, boot_volume_size_gb,
+			`SELECT id, display_name, template_id, network_id, shape, ocpu, memory_gb, boot_volume_size_gb,
 				oci_instance_id, public_ip, private_ip, status, initial_credentials, created_at, updated_at
 			FROM vps WHERE status = ? ORDER BY created_at DESC`, status)
 	} else {
 		rows, err = r.db.QueryContext(ctx,
-			`SELECT id, display_name, template_id, shape, ocpu, memory_gb, boot_volume_size_gb,
+			`SELECT id, display_name, template_id, network_id, shape, ocpu, memory_gb, boot_volume_size_gb,
 				oci_instance_id, public_ip, private_ip, status, initial_credentials, created_at, updated_at
 			FROM vps ORDER BY created_at DESC`)
 	}
@@ -61,7 +61,7 @@ func (r *VPSRepository) List(ctx context.Context, status string) ([]model.VPS, e
 	for rows.Next() {
 		var v model.VPS
 		err := rows.Scan(
-			&v.ID, &v.DisplayName, &v.TemplateID, &v.Shape, &v.OCPU, &v.MemoryGB, &v.BootVolumeSizeGB,
+			&v.ID, &v.DisplayName, &v.TemplateID, &v.NetworkID, &v.Shape, &v.OCPU, &v.MemoryGB, &v.BootVolumeSizeGB,
 			&v.OCIInstanceID, &v.PublicIP, &v.PrivateIP, &v.Status, &v.InitialCredentials,
 			&v.CreatedAt, &v.UpdatedAt,
 		)
@@ -80,11 +80,11 @@ func (r *VPSRepository) List(ctx context.Context, status string) ([]model.VPS, e
 func (r *VPSRepository) Get(ctx context.Context, id int64) (*model.VPS, error) {
 	var v model.VPS
 	err := r.db.QueryRowContext(ctx,
-		`SELECT id, display_name, template_id, shape, ocpu, memory_gb, boot_volume_size_gb,
+		`SELECT id, display_name, template_id, network_id, shape, ocpu, memory_gb, boot_volume_size_gb,
 			oci_instance_id, public_ip, private_ip, status, initial_credentials, created_at, updated_at
 		FROM vps WHERE id = ?`, id,
 	).Scan(
-		&v.ID, &v.DisplayName, &v.TemplateID, &v.Shape, &v.OCPU, &v.MemoryGB, &v.BootVolumeSizeGB,
+		&v.ID, &v.DisplayName, &v.TemplateID, &v.NetworkID, &v.Shape, &v.OCPU, &v.MemoryGB, &v.BootVolumeSizeGB,
 		&v.OCIInstanceID, &v.PublicIP, &v.PrivateIP, &v.Status, &v.InitialCredentials,
 		&v.CreatedAt, &v.UpdatedAt,
 	)
@@ -98,12 +98,12 @@ func (r *VPSRepository) Get(ctx context.Context, id int64) (*model.VPS, error) {
 }
 
 func (r *VPSRepository) Update(ctx context.Context, vps *model.VPS) error {
-	query := `UPDATE vps SET display_name=?, template_id=?, shape=?, ocpu=?, memory_gb=?, boot_volume_size_gb=?,
+	query := `UPDATE vps SET display_name=?, template_id=?, network_id=?, shape=?, ocpu=?, memory_gb=?, boot_volume_size_gb=?,
 		oci_instance_id=?, public_ip=?, private_ip=?, status=?, initial_credentials=?, updated_at=?
 		WHERE id=?`
 
 	_, err := r.db.ExecContext(ctx, query,
-		vps.DisplayName, vps.TemplateID, vps.Shape, vps.OCPU, vps.MemoryGB, vps.BootVolumeSizeGB,
+		vps.DisplayName, vps.TemplateID, vps.NetworkID, vps.Shape, vps.OCPU, vps.MemoryGB, vps.BootVolumeSizeGB,
 		vps.OCIInstanceID, vps.PublicIP, vps.PrivateIP, vps.Status, vps.InitialCredentials,
 		time.Now().UTC(), vps.ID,
 	)

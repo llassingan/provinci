@@ -51,13 +51,15 @@ func main() {
 	sseHandler := handler.NewSSEHandler(broker)
 	settingsRepo := repository.NewSettingsRepository(database)
 	settingsHandler := handler.NewSettingsHandler(settingsRepo)
+
+	networkRepo := repository.NewNetworkRepository(database)
 	templateRepo := repository.NewTemplateRepository(database)
 	templateHandler := handler.NewTemplateHandler(templateRepo)
-	networkService := service.NewNetworkService(settingsRepo, broker, "terraform")
-	networkHandler := handler.NewNetworkHandler(networkService, settingsRepo, sseHandler)
+	networkService := service.NewNetworkService(settingsRepo, networkRepo, broker, "terraform")
+	networkHandler := handler.NewNetworkHandler(networkService, networkRepo, settingsRepo, sseHandler, broker)
 
 	vpsRepo := repository.NewVPSRepository(database)
-	vpsHandler := handler.NewVPSHandler(vpsRepo, templateRepo, settingsRepo)
+	vpsHandler := handler.NewVPSHandler(vpsRepo, templateRepo, networkRepo, settingsRepo)
 
 	srv := server.New(
 		database, cfg, authService, broker,

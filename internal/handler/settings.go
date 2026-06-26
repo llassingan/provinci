@@ -17,17 +17,14 @@ func NewSettingsHandler(repo *repository.SettingsRepository) *SettingsHandler {
 }
 
 type settingsResponse struct {
-	ID                 int64  `json:"id"`
-	TenancyOCID        string `json:"tenancy_ocid"`
-	UserOCID           string `json:"user_ocid"`
-	Fingerprint        string `json:"fingerprint"`
-	PrivateKey         string `json:"private_key"`
-	Region             string `json:"region"`
-	CompartmentOCID    string `json:"compartment_ocid"`
-	VCNOCID            string `json:"vcn_ocid"`
-	SubnetOCID         string `json:"subnet_ocid"`
-	APIBaseURL         string `json:"api_base_url"`
-	NetworkProvisioned bool   `json:"network_provisioned"`
+	ID              int64  `json:"id"`
+	TenancyOCID     string `json:"tenancy_ocid"`
+	UserOCID        string `json:"user_ocid"`
+	Fingerprint     string `json:"fingerprint"`
+	PrivateKey      string `json:"private_key"`
+	Region          string `json:"region"`
+	CompartmentOCID string `json:"compartment_ocid"`
+	APIBaseURL      string `json:"api_base_url"`
 }
 
 func maskPrivateKey(key string) string {
@@ -44,17 +41,14 @@ func (h *SettingsHandler) HandleGetSettings(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	resp := settingsResponse{
-		ID:                 s.ID,
-		TenancyOCID:        s.TenancyOCID,
-		UserOCID:           s.UserOCID,
-		Fingerprint:        s.Fingerprint,
-		PrivateKey:         maskPrivateKey(s.PrivateKey),
-		Region:             s.Region,
-		CompartmentOCID:    s.CompartmentOCID,
-		VCNOCID:            s.VCNOCID,
-		SubnetOCID:         s.SubnetOCID,
-		APIBaseURL:         s.APIBaseURL,
-		NetworkProvisioned: s.NetworkProvisioned,
+		ID:              s.ID,
+		TenancyOCID:     s.TenancyOCID,
+		UserOCID:        s.UserOCID,
+		Fingerprint:     s.Fingerprint,
+		PrivateKey:      maskPrivateKey(s.PrivateKey),
+		Region:          s.Region,
+		CompartmentOCID: s.CompartmentOCID,
+		APIBaseURL:      s.APIBaseURL,
 	}
 	writeJSON(w, http.StatusOK, resp)
 }
@@ -129,17 +123,14 @@ func (h *SettingsHandler) HandleUpdateSettings(w http.ResponseWriter, r *http.Re
 	}
 
 	resp := settingsResponse{
-		ID:                 s.ID,
-		TenancyOCID:        s.TenancyOCID,
-		UserOCID:           s.UserOCID,
-		Fingerprint:        s.Fingerprint,
-		PrivateKey:         maskPrivateKey(s.PrivateKey),
-		Region:             s.Region,
-		CompartmentOCID:    s.CompartmentOCID,
-		VCNOCID:            s.VCNOCID,
-		SubnetOCID:         s.SubnetOCID,
-		APIBaseURL:         s.APIBaseURL,
-		NetworkProvisioned: s.NetworkProvisioned,
+		ID:              s.ID,
+		TenancyOCID:     s.TenancyOCID,
+		UserOCID:        s.UserOCID,
+		Fingerprint:     s.Fingerprint,
+		PrivateKey:      maskPrivateKey(s.PrivateKey),
+		Region:          s.Region,
+		CompartmentOCID: s.CompartmentOCID,
+		APIBaseURL:      s.APIBaseURL,
 	}
 	writeJSON(w, http.StatusOK, resp)
 }

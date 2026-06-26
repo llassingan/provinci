@@ -9,6 +9,7 @@ type VPS struct {
 	ID                 int64          `json:"id"`
 	DisplayName        string         `json:"display_name"`
 	TemplateID         int64          `json:"template_id"`
+	NetworkID          sql.NullInt64  `json:"network_id"`
 	Shape              string         `json:"shape"`
 	OCPU               float64        `json:"ocpu"`
 	MemoryGB           float64        `json:"memory_gb"`

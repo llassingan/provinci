@@ -34,6 +34,11 @@ func (h *SSEHandler) HandleNetworkEvents(w http.ResponseWriter, r *http.Request)
 	h.streamEvents(w, r, "network")
 }
 
+// HandleChannelEvents — generic SSE stream for a named channel
+func (h *SSEHandler) HandleChannelEvents(w http.ResponseWriter, r *http.Request, channel string) {
+	h.streamEvents(w, r, channel)
+}
+
 func (h *SSEHandler) streamEvents(w http.ResponseWriter, r *http.Request, channelID string) {
 	flusher, ok := w.(http.Flusher)
 	if !ok {

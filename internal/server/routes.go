@@ -53,9 +53,23 @@ func (s *Server) mountRoutes() {
 		}
 
 		if s.networkHandler != nil {
-			r.Post("/api/network/setup", s.networkHandler.HandleNetworkSetup)
-			r.Get("/api/network/status", s.networkHandler.HandleNetworkStatus)
+			r.Post("/api/networks", s.networkHandler.HandleCreateNetwork)
+			r.Get("/api/networks", s.networkHandler.HandleListNetworks)
+			r.Get("/api/networks/{id}", s.networkHandler.HandleGetNetwork)
+			r.Delete("/api/networks/{id}", s.networkHandler.HandleDeleteNetwork)
+			r.Post("/api/networks/{id}/provision", s.networkHandler.HandleNetworkProvision)
+			r.Get("/api/networks/{id}/events", s.networkHandler.HandleNetworkProvisionEvents)
+
+			r.Post("/api/network/setup", s.networkHandler.HandleOldNetworkSetup)
+			r.Get("/api/network/status", s.networkHandler.HandleOldNetworkStatus)
 		} else {
+			r.Post("/api/networks", handleCreateNetworkStub)
+			r.Get("/api/networks", handleListNetworksStub)
+			r.Get("/api/networks/{id}", handleGetNetworkStub)
+			r.Delete("/api/networks/{id}", handleDeleteNetworkStub)
+			r.Post("/api/networks/{id}/provision", handleNetworkProvisionStub)
+			r.Get("/api/networks/{id}/events", handleNetworkEventsStub)
+
 			r.Post("/api/network/setup", handleNetworkSetupStub)
 			r.Get("/api/network/status", handleNetworkStatusStub)
 		}
@@ -69,6 +83,30 @@ func handleListTemplatesStub(w http.ResponseWriter, r *http.Request) {
 }
 
 func handleCreateTemplateStub(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]string{"status": "not implemented yet"})
+}
+
+func handleCreateNetworkStub(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]string{"status": "not implemented yet"})
+}
+
+func handleListNetworksStub(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, []interface{}{})
+}
+
+func handleGetNetworkStub(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]string{"status": "not implemented yet"})
+}
+
+func handleDeleteNetworkStub(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func handleNetworkProvisionStub(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusAccepted, map[string]string{"status": "network_provisioning_started"})
+}
+
+func handleNetworkEventsStub(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "not implemented yet"})
 }
 

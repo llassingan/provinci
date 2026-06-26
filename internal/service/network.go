@@ -16,20 +16,27 @@ import (
 
 type NetworkService struct {
 	settingsRepo *repository.SettingsRepository
+	networkRepo  *repository.NetworkRepository
 	broker       *sse.EventBroker
 	terraformDir string
 }
 
-func NewNetworkService(settingsRepo *repository.SettingsRepository, broker *sse.EventBroker, terraformDir string) *NetworkService {
+func NewNetworkService(
+	settingsRepo *repository.SettingsRepository,
+	networkRepo *repository.NetworkRepository,
+	broker *sse.EventBroker,
+	terraformDir string,
+) *NetworkService {
 	return &NetworkService{
 		settingsRepo: settingsRepo,
+		networkRepo:  networkRepo,
 		broker:       broker,
 		terraformDir: terraformDir,
 	}
 }
 
-func (s *NetworkService) SetupNetwork(ctx context.Context) error {
-	networkChannel := "network"
+func (s *NetworkService) ProvisionNetwork(ctx context.Context, networkID int64) error {
+	channel := fmt.Sprintf("network:%d", networkID)
 
 	defer func() {
 		if keyPath := filepath.Join(os.TempDir(), "oci-key.pem"); fileExists(keyPath) {
@@ -38,7 +45,7 @@ func (s *NetworkService) SetupNetwork(ctx context.Context) error {
 	}()
 
 	emitStatus := func(step, message string) {
-		s.broker.Publish(networkChannel, sse.SSEEvent{
+		s.broker.Publish(channel, sse.SSEEvent{
 			Type:    "status",
 			Status:  "provisioning",
 			Step:    step,
@@ -47,28 +54,51 @@ func (s *NetworkService) SetupNetwork(ctx context.Context) error {
 	}
 
 	emitError := func(message string) {
-		s.broker.Publish(networkChannel, sse.SSEEvent{
+		s.broker.Publish(channel, sse.SSEEvent{
 			Type:    "error",
 			Message: message,
 		})
 	}
 
-	emitStatus("validating_credentials", "Loading OCI settings")
+	network, err := s.networkRepo.Get(ctx, networkID)
+	if err != nil || network == nil {
+		if network == nil {
+			emitError("Network not found")
+			return fmt.Errorf("network %d not found", networkID)
+		}
+		emitError("Failed to load network: " + err.Error())
+		return fmt.Errorf("get network: %w", err)
+	}
+
+	if network.Status == "provisioning" {
+		emitError("Network is already provisioning")
+		return fmt.Errorf("network %d is already provisioning", networkID)
+	}
+
+	if err := s.networkRepo.UpdateStatus(ctx, networkID, "provisioning"); err != nil {
+		emitError("Failed to update network status: " + err.Error())
+		return fmt.Errorf("update status: %w", err)
+	}
+
+	emitStatus("loading_credentials", "Loading OCI settings")
 
 	settings, err := s.settingsRepo.Get(ctx)
 	if err != nil {
+		s.networkRepo.UpdateStatus(ctx, networkID, "failed")
 		emitError("Failed to load settings: " + err.Error())
 		return fmt.Errorf("load settings: %w", err)
 	}
 
 	if settings.TenancyOCID == "" || settings.UserOCID == "" || settings.Fingerprint == "" ||
 		settings.PrivateKey == "" || settings.Region == "" || settings.CompartmentOCID == "" {
+		s.networkRepo.UpdateStatus(ctx, networkID, "failed")
 		emitError("Missing OCI credentials in settings")
 		return fmt.Errorf("incomplete OCI settings")
 	}
 
 	keyPath := filepath.Join(os.TempDir(), "oci-key.pem")
 	if err := os.WriteFile(keyPath, []byte(settings.PrivateKey), 0600); err != nil {
+		s.networkRepo.UpdateStatus(ctx, networkID, "failed")
 		emitError("Failed to write private key: " + err.Error())
 		return fmt.Errorf("write key: %w", err)
 	}
@@ -80,19 +110,25 @@ tenancy_ocid     = %q
 user_ocid        = %q
 fingerprint      = %q
 private_key_path = %q
+vcn_cidr_block   = %q
+subnet_cidr_block = %q
+display_name     = %q
+dns_label        = %q
 `, settings.Region, settings.CompartmentOCID, settings.TenancyOCID,
-		settings.UserOCID, settings.Fingerprint, keyPath)
+		settings.UserOCID, settings.Fingerprint, keyPath,
+		network.CIDRVCN, network.CIDRSubnet, network.Name, safeDNSLabel(network.Name))
 
 	if err := os.WriteFile(tfvarsPath, []byte(tfvarsContent), 0644); err != nil {
+		s.networkRepo.UpdateStatus(ctx, networkID, "failed")
 		emitError("Failed to write terraform.tfvars: " + err.Error())
 		return fmt.Errorf("write tfvars: %w", err)
 	}
 
 	steps := []struct {
-		step    string
-		label   string
-		cmd     string
-		args    []string
+		step  string
+		label string
+		cmd   string
+		args  []string
 	}{
 		{"initializing_terraform", "Running terraform init", "terraform", []string{"init"}},
 		{"planning_infrastructure", "Running terraform plan", "terraform", []string{"plan"}},
@@ -101,7 +137,8 @@ private_key_path = %q
 
 	for _, st := range steps {
 		emitStatus(st.step, st.label)
-		if err := s.runTerraformCmd(st.cmd, st.args, networkChannel); err != nil {
+		if err := s.runTerraformCmd(st.cmd, st.args, channel); err != nil {
+			s.networkRepo.UpdateStatus(ctx, networkID, "failed")
 			emitError(fmt.Sprintf("%s failed: %s", st.label, err.Error()))
 			return fmt.Errorf("%s: %w", st.step, err)
 		}
@@ -110,21 +147,18 @@ private_key_path = %q
 	emitStatus("parsing_outputs", "Parsing terraform outputs")
 	vcnOCID, subnetOCID, err := s.parseOutputs()
 	if err != nil {
+		s.networkRepo.UpdateStatus(ctx, networkID, "failed")
 		emitError("Failed to parse terraform outputs: " + err.Error())
 		return fmt.Errorf("parse outputs: %w", err)
 	}
 
-	settings.VCNOCID = vcnOCID
-	settings.SubnetOCID = subnetOCID
-	settings.NetworkProvisioned = true
-
-	if err := s.settingsRepo.Update(ctx, settings); err != nil {
-		emitError("Failed to update network settings: " + err.Error())
-		return fmt.Errorf("update settings: %w", err)
+	if err := s.networkRepo.UpdateProvisionResult(ctx, networkID, vcnOCID, subnetOCID); err != nil {
+		emitError("Failed to update network: " + err.Error())
+		return fmt.Errorf("update network: %w", err)
 	}
 
 	emitStatus("ready", "Network setup complete")
-	s.broker.Publish(networkChannel, sse.SSEEvent{
+	s.broker.Publish(channel, sse.SSEEvent{
 		Type:    "status",
 		Status:  "ready",
 		Step:    "ready",
@@ -214,6 +248,29 @@ func (s *NetworkService) parseOutputs() (string, string, error) {
 	}
 
 	return vcnOCID.Value, subnetOCID.Value, nil
+}
+
+func safeDNSLabel(name string) string {
+	result := make([]byte, 0, len(name))
+	for i := 0; i < len(name) && len(result) < 15; i++ {
+		c := name[i]
+		if (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') {
+			result = append(result, c)
+		} else if c >= 'A' && c <= 'Z' {
+			result = append(result, c+32)
+		} else if c == '-' || c == '_' {
+			result = append(result, c)
+		} else {
+			result = append(result, '-')
+		}
+	}
+	if len(result) == 0 {
+		return "network"
+	}
+	if result[0] < 'a' || result[0] > 'z' {
+		return "n" + string(result)
+	}
+	return string(result)
 }
 
 func fileExists(path string) bool {

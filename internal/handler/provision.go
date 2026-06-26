@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"database/sql"
 	"encoding/json"
 	"net/http"
 	"strconv"
@@ -12,26 +13,30 @@ import (
 )
 
 type VPSHandler struct {
-	vpsRepo    *repository.VPSRepository
-	tmplRepo   *repository.TemplateRepository
+	vpsRepo      *repository.VPSRepository
+	tmplRepo     *repository.TemplateRepository
+	networkRepo  *repository.NetworkRepository
 	settingsRepo *repository.SettingsRepository
 }
 
 func NewVPSHandler(
 	vpsRepo *repository.VPSRepository,
 	tmplRepo *repository.TemplateRepository,
+	networkRepo *repository.NetworkRepository,
 	settingsRepo *repository.SettingsRepository,
 ) *VPSHandler {
 	return &VPSHandler{
 		vpsRepo:      vpsRepo,
 		tmplRepo:     tmplRepo,
+		networkRepo:  networkRepo,
 		settingsRepo: settingsRepo,
 	}
 }
 
 type createVPSRequest struct {
-	TemplateID         int64   `json:"template_id"`
-	DisplayName        string  `json:"display_name"`
+	TemplateID         int64    `json:"template_id"`
+	NetworkID          int64    `json:"network_id"`
+	DisplayName        string   `json:"display_name"`
 	Shape              *string  `json:"shape,omitempty"`
 	OCPU               *float64 `json:"ocpu,omitempty"`
 	MemoryGB           *float64 `json:"memory_gb,omitempty"`
@@ -50,6 +55,25 @@ func (h *VPSHandler) HandleCreateVPS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if req.NetworkID == 0 {
+		writeError(w, http.StatusBadRequest, "network_id is required")
+		return
+	}
+
+	network, err := h.networkRepo.Get(r.Context(), req.NetworkID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load network")
+		return
+	}
+	if network == nil {
+		writeError(w, http.StatusNotFound, "network not found")
+		return
+	}
+	if network.Status != "ready" {
+		writeError(w, http.StatusBadRequest, "network is not ready for provisioning")
+		return
+	}
+
 	template, err := h.tmplRepo.Get(r.Context(), req.TemplateID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to load template")
@@ -62,12 +86,13 @@ func (h *VPSHandler) HandleCreateVPS(w http.ResponseWriter, r *http.Request) {
 
 	vps := &model.VPS{
 		DisplayName:      req.DisplayName,
-		TemplateID:       req.TemplateID,
-		Shape:            template.Shape,
-		OCPU:             template.DefaultOCPU,
-		MemoryGB:         template.DefaultMemory,
-		BootVolumeSizeGB: template.BootVolumeSizeGB,
-		Status:           "pending",
+		TemplateID:        req.TemplateID,
+		NetworkID:         sql.NullInt64{Int64: req.NetworkID, Valid: true},
+		Shape:             template.Shape,
+		OCPU:              template.DefaultOCPU,
+		MemoryGB:          template.DefaultMemory,
+		BootVolumeSizeGB:  template.BootVolumeSizeGB,
+		Status:            "pending",
 	}
 
 	if req.Shape != nil {
