@@ -1,0 +1,87 @@
+---
+- name: Ubuntu Base Setup
+  hosts: localhost
+  connection: local
+  become: true
+
+  tasks:
+    - name: Update apt cache
+      apt:
+        update_cache: true
+        cache_valid_time: 3600
+
+    - name: Install base packages
+      apt:
+        name:
+          - ufw
+          - fail2ban
+          - unattended-upgrades
+          - apt-listchanges
+        state: present
+
+    - name: Configure UFW
+      ufw:
+        rule: allow
+        port: "{{ item }}"
+        proto: tcp
+      loop:
+        - '80'
+        - '443'
+
+    - name: Enable UFW
+      ufw:
+        state: enabled
+        policy: deny
+        direction: incoming
+
+    - name: Configure fail2ban
+      copy:
+        dest: /etc/fail2ban/jail.local
+        content: |
+          [sshd]
+          enabled = true
+          port = 22
+          filter = sshd
+          logpath = /var/log/auth.log
+          maxretry = 5
+          bantime = 3600
+
+    - name: Start and enable fail2ban
+      systemd:
+        name: fail2ban
+        state: restarted
+        enabled: true
+
+    - name: Configure unattended-upgrades
+      copy:
+        dest: /etc/apt/apt.conf.d/50unattended-upgrades
+        content: |
+          Unattended-Upgrade::Allowed-Origins {
+              "${distro_id}:${distro_codename}-security";
+              "${distro_id}ESMApps:${distro_codename}-apps-security";
+              "${distro_id}ESM:${distro_codename}-infra-security";
+          };
+          Unattended-Upgrade::Automatic-Reboot "true";
+          Unattended-Upgrade::Automatic-Reboot-Time "02:00";
+
+    - name: Enable auto-updates
+      copy:
+        dest: /etc/apt/apt.conf.d/20auto-upgrades
+        content: |
+          APT::Periodic::Update-Package-Lists "1";
+          APT::Periodic::Download-Upgradeable-Packages "1";
+          APT::Periodic::AutocleanInterval "7";
+          APT::Periodic::Unattended-Upgrade "1";
+
+    - name: Create credentials directory
+      file:
+        path: /root/.vpsstore
+        state: directory
+        mode: '0700'
+
+    - name: Write credentials file
+      copy:
+        dest: /root/.vpsstore/credentials.json
+        content: |
+          {"ready": true}
+        mode: '0600'

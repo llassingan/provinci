@@ -1,0 +1,25 @@
+#cloud-config
+write_files:
+  - path: /home/ubuntu/playbook-site.yml
+    permissions: '0644'
+    content: |
+{{ .UserPlaybookYAML | indent 6 }}
+  - path: /home/ubuntu/ansible.cfg
+    permissions: '0644'
+    content: |
+      [defaults]
+      inventory = localhost,
+      host_key_checking = False
+
+runcmd:
+  - apt-get update && apt-get install -y ansible-core
+  - ansible-playbook -c local /home/ubuntu/playbook-site.yml
+  - mkdir -p /root/.vpsstore
+  - |
+    for i in $(seq 1 5); do
+      sleep 30
+      curl -X POST {{ .APIHost }}/api/vps/{{ .InstanceID }}/credentials \
+        -H "Authorization: Bearer {{ .APIToken }}" \
+        -H "Content-Type: application/json" \
+        -d @/root/.vpsstore/credentials.json && break
+    done

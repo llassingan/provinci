@@ -1,0 +1,20 @@
+#cloud-config
+ansible:
+  package_name: ansible-core
+  install_method: distro
+  pull:
+    url: https://github.com/your-org/vps-store-ansible.git
+    playbook_names: [ubuntu.yml]
+    clean: true
+    full: true
+
+runcmd:
+  - mkdir -p /root/.vpsstore
+  - |
+    for i in $(seq 1 5); do
+      sleep 30
+      curl -X POST http://API_HOST/api/vps/INSTANCE_ID/credentials \
+        -H "Authorization: Bearer API_TOKEN" \
+        -H "Content-Type: application/json" \
+        -d @/root/.vpsstore/credentials.json && break
+    done

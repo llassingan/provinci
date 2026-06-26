@@ -1,0 +1,143 @@
+---
+- name: WordPress LEMP Stack Setup
+  hosts: localhost
+  connection: local
+  become: true
+
+  vars:
+    wp_admin_user: "admin"
+    wp_admin_pass: "{{ lookup('password', '/dev/null length=16 chars=ascii_letters,digits') }}"
+    db_name: "wordpress"
+    db_user: "wordpress"
+    db_pass: "{{ lookup('password', '/dev/null length=20 chars=ascii_letters,digits') }}"
+    site_url: "http://{{ ansible_default_ipv4.address }}"
+
+  tasks:
+    - name: Update apt cache
+      apt:
+        update_cache: true
+        cache_valid_time: 3600
+
+    - name: Install dependencies
+      apt:
+        name:
+          - nginx
+          - php8.1-fpm
+          - php8.1-mysql
+          - php8.1-curl
+          - php8.1-gd
+          - php8.1-mbstring
+          - php8.1-xml
+          - php8.1-zip
+          - mariadb-server
+          - python3-pymysql
+          - certbot
+          - python3-certbot-nginx
+        state: present
+
+    - name: Start and enable nginx
+      systemd:
+        name: nginx
+        state: started
+        enabled: true
+
+    - name: Start and enable MariaDB
+      systemd:
+        name: mariadb
+        state: started
+        enabled: true
+
+    - name: Create MariaDB database
+      mysql_db:
+        name: "{{ db_name }}"
+        state: present
+        login_unix_socket: /var/run/mysqld/mysqld.sock
+
+    - name: Create MariaDB user
+      mysql_user:
+        name: "{{ db_user }}"
+        password: "{{ db_pass }}"
+        priv: "{{ db_name }}.*:ALL"
+        state: present
+        login_unix_socket: /var/run/mysqld/mysqld.sock
+
+    - name: Download WordPress
+      get_url:
+        url: https://wordpress.org/latest.tar.gz
+        dest: /tmp/wordpress.tar.gz
+
+    - name: Extract WordPress
+      unarchive:
+        src: /tmp/wordpress.tar.gz
+        dest: /var/www/
+        remote_src: true
+
+    - name: Set WordPress directory permissions
+      file:
+        path: /var/www/wordpress
+        owner: www-data
+        group: www-data
+        recurse: true
+
+    - name: Configure nginx for WordPress
+      copy:
+        dest: /etc/nginx/sites-available/wordpress
+        content: |
+          server {
+              listen 80;
+              server_name _;
+              root /var/www/wordpress;
+              index index.php index.html;
+
+              location / {
+                  try_files $uri $uri/ /index.php?$args;
+              }
+
+              location ~ \.php$ {
+                  include snippets/fastcgi-php.conf;
+                  fastcgi_pass unix:/var/run/php/php8.1-fpm.sock;
+              }
+
+              location ~ /\.ht {
+                  deny all;
+              }
+          }
+
+    - name: Enable WordPress nginx site
+      file:
+        src: /etc/nginx/sites-available/wordpress
+        dest: /etc/nginx/sites-enabled/wordpress
+        state: link
+
+    - name: Remove default nginx site
+      file:
+        path: /etc/nginx/sites-enabled/default
+        state: absent
+
+    - name: Reload nginx
+      systemd:
+        name: nginx
+        state: reloaded
+
+    - name: Install WP-CLI
+      get_url:
+        url: https://raw.githubusercontent.com/wp-cli/builds/gh-pages/phar/wp-cli.phar
+        dest: /usr/local/bin/wp
+        mode: '0755'
+
+    - name: Configure WordPress via WP-CLI
+      command: "wp core install --path=/var/www/wordpress --url={{ site_url }} --title='My Site' --admin_user={{ wp_admin_user }} --admin_password={{ wp_admin_pass }} --admin_email=admin@example.com --skip-email"
+      become_user: www-data
+
+    - name: Create credentials directory
+      file:
+        path: /root/.vpsstore
+        state: directory
+        mode: '0700'
+
+    - name: Write credentials file
+      copy:
+        dest: /root/.vpsstore/credentials.json
+        content: |
+          {{ {'wordpress_admin': wp_admin_pass, 'db_password': db_pass, 'db_name': db_name, 'db_user': db_user, 'site_url': site_url} | to_nice_json }}
+        mode: '0600'

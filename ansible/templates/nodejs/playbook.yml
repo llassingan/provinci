@@ -1,0 +1,140 @@
+---
+- name: Node.js App Server Setup
+  hosts: localhost
+  connection: local
+  become: true
+
+  tasks:
+    - name: Update apt cache
+      apt:
+        update_cache: true
+        cache_valid_time: 3600
+
+    - name: Install dependencies
+      apt:
+        name:
+          - nginx
+          - curl
+          - ca-certificates
+          - gnupg
+        state: present
+
+    - name: Add NodeSource repository for Node.js 20 LTS
+      shell: |
+        curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
+      args:
+        creates: /etc/apt/sources.list.d/nodesource.list
+
+    - name: Install Node.js
+      apt:
+        name: nodejs
+        state: present
+        update_cache: true
+
+    - name: Install PM2 globally
+      npm:
+        name: pm2
+        global: true
+
+    - name: Create app directory
+      file:
+        path: /opt/app
+        state: directory
+        owner: ubuntu
+        group: ubuntu
+
+    - name: Create sample Express app
+      copy:
+        dest: /opt/app/package.json
+        content: |
+          {
+            "name": "sample-app",
+            "version": "1.0.0",
+            "main": "index.js",
+            "scripts": { "start": "node index.js" },
+            "dependencies": { "express": "^4.18.0" }
+          }
+        owner: ubuntu
+        group: ubuntu
+
+    - name: Create app index
+      copy:
+        dest: /opt/app/index.js
+        content: |
+          const express = require('express');
+          const app = express();
+          const PORT = process.env.PORT || 3000;
+
+          app.get('/', (req, res) => {
+              res.json({ status: 'ok', message: 'Node.js app is running' });
+          });
+
+          app.listen(PORT, () => {
+              console.log(`App listening on port ${PORT}`);
+          });
+        owner: ubuntu
+        group: ubuntu
+
+    - name: Install npm dependencies
+      npm:
+        path: /opt/app
+
+    - name: Start app with PM2
+      command: pm2 start /opt/app/index.js --name sample-app
+      become_user: ubuntu
+      args:
+        creates: /home/ubuntu/.pm2/pids/sample-app.pid
+
+    - name: Save PM2 process list
+      command: pm2 save
+      become_user: ubuntu
+
+    - name: Configure nginx reverse proxy
+      copy:
+        dest: /etc/nginx/sites-available/nodejs
+        content: |
+          server {
+              listen 80;
+              server_name _;
+
+              location / {
+                  proxy_pass http://localhost:3000;
+                  proxy_http_version 1.1;
+                  proxy_set_header Upgrade $http_upgrade;
+                  proxy_set_header Connection 'upgrade';
+                  proxy_set_header Host $host;
+                  proxy_cache_bypass $http_upgrade;
+                  proxy_set_header X-Real-IP $remote_addr;
+                  proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+              }
+          }
+
+    - name: Enable Node.js nginx site
+      file:
+        src: /etc/nginx/sites-available/nodejs
+        dest: /etc/nginx/sites-enabled/nodejs
+        state: link
+
+    - name: Remove default nginx site
+      file:
+        path: /etc/nginx/sites-enabled/default
+        state: absent
+
+    - name: Start and enable nginx
+      systemd:
+        name: nginx
+        state: restarted
+        enabled: true
+
+    - name: Create credentials directory
+      file:
+        path: /root/.vpsstore
+        state: directory
+        mode: '0700'
+
+    - name: Write credentials file
+      copy:
+        dest: /root/.vpsstore/credentials.json
+        content: |
+          {{ {'app_url': 'http://' + ansible_default_ipv4.address} | to_nice_json }}
+        mode: '0600'
