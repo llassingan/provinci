@@ -51,6 +51,29 @@ function ProtectedRoute({ children }: { children: ReactNode }) {
   return <>{children}</>;
 }
 
+function SettingsGuard({
+  settings,
+  children,
+}: {
+  settings: Settings | null;
+  children: ReactNode;
+}): JSX.Element {
+  if (settings === null) {
+    return (
+      <div className="flex h-screen items-center justify-center">
+        <div className="h-8 w-8 animate-spin rounded-full border-4 border-primary-200 border-t-primary-600" />
+      </div>
+    );
+  }
+
+  if (!settings.network_provisioned) {
+    sessionStorage.setItem("onboarding_forced", "1");
+    return <Navigate to="/dashboard" replace />;
+  }
+
+  return <>{children}</>;
+}
+
 export default function App(): JSX.Element {
   const [appSettings, setAppSettings] = useState<Settings | null>(null);
 
@@ -90,7 +113,9 @@ export default function App(): JSX.Element {
         element={
           <ProtectedRoute>
             <Layout settings={appSettings} onSettingsRefresh={fetchSettings}>
-              <NewVPS />
+              <SettingsGuard settings={appSettings}>
+                <NewVPS />
+              </SettingsGuard>
             </Layout>
           </ProtectedRoute>
         }

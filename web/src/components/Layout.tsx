@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import type { ReactNode } from "react";
 import { auth } from "../lib/api";
@@ -24,11 +24,29 @@ export default function Layout({
   onSettingsRefresh: _onSettingsRefresh,
 }: LayoutProps): JSX.Element {
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [showOnboarding, setShowOnboarding] = useState(() => {
-    if (settings === null || settings.network_provisioned) return false;
-    if (localStorage.getItem("onboarding_dismissed") === "1") return false;
-    return true;
-  });
+  const [showOnboarding, setShowOnboarding] = useState(false);
+
+  useEffect(() => {
+    if (settings === null) {
+      setShowOnboarding(false);
+      return;
+    }
+
+    if (settings.network_provisioned) {
+      setShowOnboarding(false);
+      return;
+    }
+
+    if (sessionStorage.getItem("onboarding_forced") === "1") {
+      sessionStorage.removeItem("onboarding_forced");
+      setShowOnboarding(true);
+      return;
+    }
+
+    if (localStorage.getItem("onboarding_dismissed") !== "1") {
+      setShowOnboarding(true);
+    }
+  }, [settings]);
   const location = useLocation();
   const navigate = useNavigate();
 
@@ -71,6 +89,36 @@ export default function Layout({
         <nav className="flex-1 space-y-1 px-3 py-4">
           {NAV_ITEMS.map((item) => {
             const active = location.pathname === item.path;
+            const linkClass = `
+                  flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors
+                  ${
+                    active
+                      ? "bg-sidebar-active text-white"
+                      : "text-gray-400 hover:bg-sidebar-hover hover:text-white"
+                  }
+                `;
+
+            if (
+              item.path === "/vps/new" &&
+              settings &&
+              !settings.network_provisioned
+            ) {
+              return (
+                <button
+                  key={item.path}
+                  type="button"
+                  onClick={() => {
+                    setSidebarOpen(false);
+                    setShowOnboarding(true);
+                  }}
+                  className={`w-full text-left ${linkClass}`}
+                >
+                  <item.icon className="h-5 w-5" />
+                  {item.label}
+                </button>
+              );
+            }
+
             return (
               <Link
                 key={item.path}
@@ -78,14 +126,7 @@ export default function Layout({
                 onClick={() => {
                   setSidebarOpen(false);
                 }}
-                className={`
-                  flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors
-                  ${
-                    active
-                      ? "bg-sidebar-active text-white"
-                      : "text-gray-400 hover:bg-sidebar-hover hover:text-white"
-                  }
-                `}
+                className={linkClass}
               >
                 <item.icon className="h-5 w-5" />
                 {item.label}
