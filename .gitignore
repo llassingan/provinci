@@ -5,7 +5,7 @@ opencode.json
 .env
 .env.*
 !.env.example
-
+**/node_modules
 # Terraform
 **/.terraform/
 *.tfstate
@@ -35,5 +35,3 @@ Thumbs.db
 
 .opencode
 .sisyphus
-backlog.md
-vps-store-poc.md

@@ -1,0 +1,14 @@
+data/
+node_modules/
+web/
+.git/
+.opencode/
+.sisyphus/
+terraform/.terraform/
+terraform/terraform.tfstate
+terraform/terraform.tfstate.backup
+terraform/terraform.tfvars
+*.md
+.env
+.env.*
+!.env.example
