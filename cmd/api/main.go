@@ -42,9 +42,7 @@ func main() {
 		log.Fatalf("auth service: %v", err)
 	}
 
-	if err := repository.SeedTemplates(database, "."); err != nil {
-		log.Printf("seed templates: %v (continuing)", err)
-	}
+	repository.SeedAll(database, ".", cfg.Dev)
 
 	broker := sse.NewEventBroker()
 
@@ -59,7 +57,9 @@ func main() {
 	networkHandler := handler.NewNetworkHandler(networkService, networkRepo, settingsRepo, sseHandler, broker)
 
 	vpsRepo := repository.NewVPSRepository(database)
-	vpsHandler := handler.NewVPSHandler(vpsRepo, templateRepo, networkRepo, settingsRepo)
+	ociComputeService := service.NewOCIComputeService(settingsRepo)
+	vpsProvisionService := service.NewVPSProvisionService(ociComputeService, vpsRepo, networkRepo, templateRepo, broker, settingsRepo)
+	vpsHandler := handler.NewVPSHandler(vpsRepo, templateRepo, networkRepo, settingsRepo, vpsProvisionService)
 
 	srv := server.New(
 		database, cfg, authService, broker,

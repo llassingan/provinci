@@ -10,13 +10,15 @@ import (
 
 	"vps-store/internal/model"
 	"vps-store/internal/repository"
+	"vps-store/internal/service"
 )
 
 type VPSHandler struct {
-	vpsRepo      *repository.VPSRepository
-	tmplRepo     *repository.TemplateRepository
-	networkRepo  *repository.NetworkRepository
-	settingsRepo *repository.SettingsRepository
+	vpsRepo          *repository.VPSRepository
+	tmplRepo         *repository.TemplateRepository
+	networkRepo      *repository.NetworkRepository
+	settingsRepo     *repository.SettingsRepository
+	provisionService *service.VPSProvisionService
 }
 
 func NewVPSHandler(
@@ -24,12 +26,14 @@ func NewVPSHandler(
 	tmplRepo *repository.TemplateRepository,
 	networkRepo *repository.NetworkRepository,
 	settingsRepo *repository.SettingsRepository,
+	provisionService *service.VPSProvisionService,
 ) *VPSHandler {
 	return &VPSHandler{
-		vpsRepo:      vpsRepo,
-		tmplRepo:     tmplRepo,
-		networkRepo:  networkRepo,
-		settingsRepo: settingsRepo,
+		vpsRepo:          vpsRepo,
+		tmplRepo:         tmplRepo,
+		networkRepo:      networkRepo,
+		settingsRepo:     settingsRepo,
+		provisionService: provisionService,
 	}
 }
 
@@ -87,7 +91,7 @@ func (h *VPSHandler) HandleCreateVPS(w http.ResponseWriter, r *http.Request) {
 	vps := &model.VPS{
 		DisplayName:      req.DisplayName,
 		TemplateID:        req.TemplateID,
-		NetworkID:         sql.NullInt64{Int64: req.NetworkID, Valid: true},
+		NetworkID:         model.NullInt64{NullInt64: sql.NullInt64{Int64: req.NetworkID, Valid: true}},
 		Shape:             template.Shape,
 		OCPU:              template.DefaultOCPU,
 		MemoryGB:          template.DefaultMemory,
@@ -204,4 +208,260 @@ func (h *VPSHandler) HandleCredentialsCallback(w http.ResponseWriter, r *http.Re
 	}
 
 	writeError(w, http.StatusForbidden, "forbidden")
+}
+
+func (h *VPSHandler) HandleStartVPS(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid VPS id")
+		return
+	}
+
+	vps, err := h.vpsRepo.Get(r.Context(), id)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to get VPS")
+		return
+	}
+	if vps == nil {
+		writeError(w, http.StatusNotFound, "VPS not found")
+		return
+	}
+
+	if h.provisionService == nil {
+		writeError(w, http.StatusServiceUnavailable, "provisioning service not available")
+		return
+	}
+
+	if err := h.provisionService.StartInstance(r.Context(), id); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	vps, err = h.vpsRepo.Get(r.Context(), id)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to get updated VPS")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, vps)
+}
+
+func (h *VPSHandler) HandleStopVPS(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid VPS id")
+		return
+	}
+
+	vps, err := h.vpsRepo.Get(r.Context(), id)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to get VPS")
+		return
+	}
+	if vps == nil {
+		writeError(w, http.StatusNotFound, "VPS not found")
+		return
+	}
+
+	if h.provisionService == nil {
+		writeError(w, http.StatusServiceUnavailable, "provisioning service not available")
+		return
+	}
+
+	if err := h.provisionService.StopInstance(r.Context(), id); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	vps, err = h.vpsRepo.Get(r.Context(), id)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to get updated VPS")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, vps)
+}
+
+func (h *VPSHandler) HandleRestartVPS(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid VPS id")
+		return
+	}
+
+	vps, err := h.vpsRepo.Get(r.Context(), id)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to get VPS")
+		return
+	}
+	if vps == nil {
+		writeError(w, http.StatusNotFound, "VPS not found")
+		return
+	}
+
+	if h.provisionService == nil {
+		writeError(w, http.StatusServiceUnavailable, "provisioning service not available")
+		return
+	}
+
+	if err := h.provisionService.RestartInstance(r.Context(), id); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	vps, err = h.vpsRepo.Get(r.Context(), id)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to get updated VPS")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, vps)
+}
+
+func (h *VPSHandler) HandleResetVPS(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid VPS id")
+		return
+	}
+
+	vps, err := h.vpsRepo.Get(r.Context(), id)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to get VPS")
+		return
+	}
+	if vps == nil {
+		writeError(w, http.StatusNotFound, "VPS not found")
+		return
+	}
+
+	if h.provisionService == nil {
+		writeError(w, http.StatusServiceUnavailable, "provisioning service not available")
+		return
+	}
+
+	if err := h.provisionService.ResetInstance(r.Context(), id); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	vps, err = h.vpsRepo.Get(r.Context(), id)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to get updated VPS")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, vps)
+}
+
+type resetPasswordRequest struct {
+	Password string `json:"password"`
+}
+
+func (h *VPSHandler) HandleResetPasswordVPS(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid VPS id")
+		return
+	}
+
+	var req resetPasswordRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	if req.Password == "" {
+		writeError(w, http.StatusBadRequest, "password is required")
+		return
+	}
+
+	vps, err := h.vpsRepo.Get(r.Context(), id)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to get VPS")
+		return
+	}
+	if vps == nil {
+		writeError(w, http.StatusNotFound, "VPS not found")
+		return
+	}
+
+	if h.provisionService == nil {
+		writeError(w, http.StatusServiceUnavailable, "provisioning service not available")
+		return
+	}
+
+	if err := h.provisionService.ResetPassword(r.Context(), id, req.Password); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	vps, err = h.vpsRepo.Get(r.Context(), id)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to get updated VPS")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, vps)
+}
+
+func (h *VPSHandler) HandleGetFirewall(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid VPS id")
+		return
+	}
+
+	_, err = h.vpsRepo.Get(r.Context(), id)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to get VPS")
+		return
+	}
+
+	if h.provisionService == nil {
+		writeError(w, http.StatusServiceUnavailable, "provisioning service not available")
+		return
+	}
+
+	rules, err := h.provisionService.GetFirewallRules(r.Context(), id)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{"rules": rules})
+}
+
+func (h *VPSHandler) HandleUpdateFirewall(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid VPS id")
+		return
+	}
+
+	var req struct {
+		Rules []service.FirewallRule `json:"rules"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	_, err = h.vpsRepo.Get(r.Context(), id)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to get VPS")
+		return
+	}
+
+	if h.provisionService == nil {
+		writeError(w, http.StatusServiceUnavailable, "provisioning service not available")
+		return
+	}
+
+	if err := h.provisionService.UpdateFirewallRules(r.Context(), id, req.Rules); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{"status": "firewall updated"})
 }
