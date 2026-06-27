@@ -86,6 +86,20 @@ export interface VPS {
   updated_at: string;
 }
 
+export interface FirewallRule {
+  port: number;
+  name: string;
+  description: string;
+  direction: "ingress" | "egress";
+  source?: string;
+  destination?: string;
+}
+
+export interface FirewallRules {
+  ingress: FirewallRule[];
+  egress: FirewallRule[];
+}
+
 export interface Settings {
   id: number;
   tenancy_ocid: string;
@@ -161,6 +175,32 @@ export const vps = {
 
   action(id: number, action: "start" | "stop"): Promise<VPS> {
     return apiFetch<VPS>(`/vps/${id}/${action}`, { method: "POST" });
+  },
+
+  restart(id: number): Promise<VPS> {
+    return apiFetch<VPS>(`/vps/${id}/restart`, { method: "POST" });
+  },
+
+  reset(id: number): Promise<VPS> {
+    return apiFetch<VPS>(`/vps/${id}/reset`, { method: "POST" });
+  },
+
+  resetPassword(id: number, password: string): Promise<VPS> {
+    return apiFetch<VPS>(`/vps/${id}/reset-password`, {
+      method: "POST",
+      body: JSON.stringify({ password }),
+    });
+  },
+
+  getFirewall(id: number): Promise<FirewallRules> {
+    return apiFetch<FirewallRules>(`/vps/${id}/firewall`);
+  },
+
+  updateFirewall(id: number, rules: FirewallRule[]): Promise<FirewallRules> {
+    return apiFetch<FirewallRules>(`/vps/${id}/firewall`, {
+      method: "POST",
+      body: JSON.stringify({ rules }),
+    });
   },
 };
 

@@ -6,6 +6,7 @@ import Signup from "./pages/Signup";
 import Dashboard from "./pages/Dashboard";
 import NewVPS from "./pages/NewVPS";
 import VPSDetail from "./pages/VPSDetail";
+import VPSManage from "./pages/VPSManage";
 import SettingsPage from "./pages/Settings";
 import CustomTemplate from "./pages/CustomTemplate";
 import Networks from "./pages/Networks";
@@ -27,9 +28,13 @@ function ProtectedRoute({ children }: { children: ReactNode }) {
           setChecking(false);
         }
       })
-      .catch(() => {
+      .catch((err: unknown) => {
         if (!cancelled) {
-          setAuthorized(false);
+          if (err instanceof Error && err.message === "Unauthorized") {
+            setAuthorized(false);
+          } else {
+            setAuthorized(true);
+          }
           setChecking(false);
         }
       });
@@ -123,6 +128,16 @@ export default function App(): JSX.Element {
           <ProtectedRoute>
             <Layout settings={appSettings} onSettingsRefresh={fetchSettings}>
               <VPSDetail />
+            </Layout>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/vps/:id/manage"
+        element={
+          <ProtectedRoute>
+            <Layout settings={appSettings} onSettingsRefresh={fetchSettings}>
+              <VPSManage />
             </Layout>
           </ProtectedRoute>
         }
