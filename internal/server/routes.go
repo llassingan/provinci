@@ -23,6 +23,12 @@ func (s *Server) mountRoutes() {
 	r.Group(func(r chi.Router) {
 		r.Use(AuthMiddleware(s.authService))
 
+		if s.templateHandler != nil {
+			r.Get("/api/shapes", s.templateHandler.HandleListShapes)
+		} else {
+			r.Get("/api/shapes", handleListShapesStub)
+		}
+
 		r.Post("/api/vps", s.vpsHandler.HandleCreateVPS)
 		r.Get("/api/vps", s.vpsHandler.HandleListVPS)
 		r.Get("/api/vps/{id}", s.vpsHandler.HandleGetVPS)
@@ -87,6 +93,10 @@ func (s *Server) mountRoutes() {
 
 func handleListTemplatesStub(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "not implemented yet"})
+}
+
+func handleListShapesStub(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, []interface{}{})
 }
 
 func handleCreateTemplateStub(w http.ResponseWriter, r *http.Request) {

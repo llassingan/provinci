@@ -7,6 +7,7 @@ import (
 
 	"vps-store/internal/model"
 	"vps-store/internal/repository"
+	"vps-store/internal/validator"
 )
 
 type TemplateHandler struct {
@@ -121,4 +122,8 @@ func (h *TemplateHandler) HandleCreateTemplate(w http.ResponseWriter, r *http.Re
 	}
 
 	writeJSON(w, http.StatusCreated, templateToList(created))
+}
+
+func (h *TemplateHandler) HandleListShapes(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, validator.ShapeGroups())
 }
