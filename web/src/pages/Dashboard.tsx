@@ -277,8 +277,9 @@ export default function Dashboard({
                 />
               </div>
 
-              <div className="absolute right-4 top-4 text-gray-300 opacity-0 transition-opacity group-hover:opacity-100">
-                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <div className="mt-2 flex items-center gap-1 text-xs text-gray-300 opacity-0 transition-opacity group-hover:opacity-100 group-hover:text-primary-400">
+                <span>View details</span>
+                <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 4.5L21 12m0 0l-7.5 7.5M21 12H3" />
                 </svg>
               </div>
