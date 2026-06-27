@@ -231,6 +231,10 @@ export default function Networks(): JSX.Element {
 
               <div className="mb-4 space-y-1.5 text-sm">
                 <div className="flex items-center gap-1.5">
+                  <span className="text-gray-400">Region:</span>
+                  <span className="text-xs text-gray-700">{net.region || "—"}</span>
+                </div>
+                <div className="flex items-center gap-1.5">
                   <span className="text-gray-400">VCN:</span>
                   <code className="rounded bg-gray-100 px-1.5 py-0.5 text-xs text-gray-700">
                     {net.cidr_vcn}

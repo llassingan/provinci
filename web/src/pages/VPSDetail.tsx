@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { vps } from "../lib/api";
-import type { VPS } from "../lib/api";
+import { vps, networks } from "../lib/api";
+import type { VPS, Network } from "../lib/api";
 import { useSSE } from "../hooks/useSSE";
 import ProvisioningLog from "../components/ProvisioningLog";
 import VPSActions from "../components/VPSActions";
@@ -40,6 +40,7 @@ function StatusBadge({ status }: { status: VPS["status"] }): JSX.Element {
 export default function VPSDetail(): JSX.Element {
   const { id } = useParams<{ id: string }>();
   const [instance, setInstance] = useState<VPS | null>(null);
+  const [network, setNetwork] = useState<Network | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const navigate = useNavigate();
@@ -68,6 +69,11 @@ export default function VPSDetail(): JSX.Element {
         setLoading(false);
       });
   }, [numericId]);
+
+  useEffect(() => {
+    if (!instance?.network_id) return;
+    networks.get(instance.network_id).then(setNetwork).catch(() => setNetwork(null));
+  }, [instance?.network_id]);
 
   useEffect(() => {
     if (events.length === 0) return;
@@ -116,13 +122,15 @@ export default function VPSDetail(): JSX.Element {
   }
 
   const infoCards = [
-    { label: "Template ID", value: String(instance.template_id) },
     { label: "Shape", value: instance.shape },
     { label: "OCPU", value: String(instance.ocpu) },
     { label: "Memory", value: `${instance.memory_gb} GB` },
     { label: "Boot Volume", value: `${instance.boot_volume_size_gb} GB` },
     { label: "Public IP", value: instance.public_ip ?? "—", copyable: true },
     { label: "Private IP", value: instance.private_ip ?? "—", copyable: true },
+    network
+      ? { label: "Network", value: `${network.name}${network.region ? " · " + network.region : ""}` }
+      : { label: "Network", value: "—" },
   ];
 
   return (

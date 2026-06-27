@@ -39,6 +39,7 @@ export interface User {
 export interface Network {
   id: number;
   name: string;
+  region: string;
   cidr_vcn: string;
   cidr_subnet: string;
   vcn_ocid: string;
@@ -46,6 +47,16 @@ export interface Network {
   status: "pending" | "provisioning" | "ready" | "failed";
   created_at: string;
   updated_at: string;
+}
+
+export interface RegionItem {
+  key: string;
+  name: string;
+}
+
+export interface RegionGroup {
+  group: string;
+  items: RegionItem[];
 }
 
 export interface Template {
@@ -262,6 +273,12 @@ export const settings = {
   },
 };
 
+export const regions = {
+  groups(): Promise<RegionGroup[]> {
+    return apiFetch<RegionGroup[]>("/regions");
+  },
+};
+
 export const networks = {
   list(): Promise<Network[]> {
     return apiFetch<Network[]>("/networks");
@@ -271,10 +288,10 @@ export const networks = {
     return apiFetch<Network>(`/networks/${id}`);
   },
 
-  create(name: string): Promise<Network> {
+  create(name: string, region: string): Promise<Network> {
     return apiFetch<Network>("/networks", {
       method: "POST",
-      body: JSON.stringify({ name }),
+      body: JSON.stringify({ name, region }),
     });
   },
 

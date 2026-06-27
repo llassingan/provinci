@@ -326,7 +326,7 @@ export default function NewVPS(): JSX.Element {
                 }} className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:border-primary-500 focus:outline-none focus:ring-1 focus:ring-primary-500" required>
                   <option value="" disabled>Select a network</option>
                   {networkList.map((net) => (
-                    <option key={net.id} value={net.id}>{net.name} ({net.cidr_vcn})</option>
+                    <option key={net.id} value={net.id}>{net.name} ({net.region} · {net.cidr_vcn})</option>
                   ))}
                 </select>
               )}
@@ -384,7 +384,7 @@ export default function NewVPS(): JSX.Element {
               </div>
               <div className="flex justify-between">
                 <dt className="text-sm text-gray-500">Network</dt>
-                <dd className="text-sm font-medium text-gray-900">{selectedNetwork?.name ?? "—"}</dd>
+                <dd className="text-sm font-medium text-gray-900">{selectedNetwork?.name ?? "—"} ({selectedNetwork?.region ?? ""})</dd>
               </div>
             </dl>
           </div>

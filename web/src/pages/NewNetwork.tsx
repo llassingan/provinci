@@ -1,12 +1,14 @@
 import { useState, type FormEvent, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
-import { networks, settings } from "../lib/api";
-import type { Network } from "../lib/api";
+import { networks, settings, regions } from "../lib/api";
+import type { Network, RegionGroup } from "../lib/api";
 import { useSSE } from "../hooks/useSSE";
 import ProvisioningLog from "../components/ProvisioningLog";
 
 export default function NewNetwork(): JSX.Element {
   const [name, setName] = useState("");
+  const [region, setRegion] = useState("");
+  const [regionGroups, setRegionGroups] = useState<RegionGroup[]>([]);
   const [network, setNetwork] = useState<Network | null>(null);
   const [creating, setCreating] = useState(false);
   const [provisioning, setProvisioning] = useState(false);
@@ -31,6 +33,7 @@ export default function NewNetwork(): JSX.Element {
       .finally(() => {
         setCheckingCredentials(false);
       });
+    regions.groups().then(setRegionGroups).catch(() => {});
   }, []);
 
   const { events, connected } = useSSE(
@@ -54,11 +57,15 @@ export default function NewNetwork(): JSX.Element {
         setError("Please enter a network name.");
         return;
       }
+      if (region === "") {
+        setError("Please select a region.");
+        return;
+      }
 
       setCreating(true);
       setError("");
       try {
-        const created = await networks.create(name.trim());
+        const created = await networks.create(name.trim(), region);
         setNetwork(created);
       } catch (err: unknown) {
         setError(
@@ -211,6 +218,12 @@ export default function NewNetwork(): JSX.Element {
                 </dd>
               </div>
               <div className="flex justify-between border-b border-gray-100 pb-3">
+                <dt className="text-sm text-gray-500">Region</dt>
+                <dd className="text-sm font-medium text-gray-900">
+                  {network.region || "—"}
+                </dd>
+              </div>
+              <div className="flex justify-between border-b border-gray-100 pb-3">
                 <dt className="text-sm text-gray-500">VCN CIDR</dt>
                 <dd className="font-mono text-sm font-medium text-gray-900">
                   {network.cidr_vcn || "Pending allocation"}
@@ -265,7 +278,7 @@ export default function NewNetwork(): JSX.Element {
             void handleCreate(e);
           }}
         >
-          <div className="rounded-xl border border-gray-200 bg-white p-6">
+          <div className="rounded-xl border border-gray-200 bg-white p-6 space-y-5">
             <div>
               <label
                 htmlFor="network-name"
@@ -284,6 +297,39 @@ export default function NewNetwork(): JSX.Element {
                 placeholder="production-vcn"
                 required
               />
+            </div>
+
+            <div>
+              <label className="mb-2 block text-sm font-medium text-gray-700">Region</label>
+              {regionGroups.length === 0 ? (
+                <div className="text-sm text-gray-400">Loading regions...</div>
+              ) : (
+                <div className="space-y-4">
+                  {regionGroups.map((group) => (
+                    <div key={group.group}>
+                      <div className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-gray-400">
+                        {group.group}
+                      </div>
+                      <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                        {group.items.map((item) => (
+                          <button
+                            key={item.key}
+                            type="button"
+                            onClick={() => setRegion(item.key)}
+                            className={`rounded-lg border px-3 py-2 text-left text-sm transition-all ${
+                              region === item.key
+                                ? "border-primary-500 bg-primary-50 shadow-sm font-medium text-primary-700"
+                                : "border-gray-200 bg-white hover:border-gray-300 text-gray-700"
+                            }`}
+                          >
+                            {item.name}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
 
