@@ -15,18 +15,26 @@ import (
 type OCIComputeService struct {
 	settingsRepo *repository.SettingsRepository
 
-	mu                    sync.Mutex
-	initialized           bool
-	configProvider        common.ConfigurationProvider
-	compartmentOCID       string
-	computeClient         core.ComputeClient
-	virtualNetworkClient  core.VirtualNetworkClient
-	instanceAgentClient   computeinstanceagent.ComputeInstanceAgentClient
+	mu              sync.Mutex
+	initialized     bool
+	compartmentOCID string
+	tenancyOCID     string
+	userOCID        string
+	fingerprint     string
+	privateKey      string
+	cachedClients   map[string]*regionClients
+}
+
+type regionClients struct {
+	computeClient        core.ComputeClient
+	virtualNetworkClient core.VirtualNetworkClient
+	instanceAgentClient  computeinstanceagent.ComputeInstanceAgentClient
 }
 
 func NewOCIComputeService(settingsRepo *repository.SettingsRepository) *OCIComputeService {
 	return &OCIComputeService{
-		settingsRepo: settingsRepo,
+		settingsRepo:  settingsRepo,
+		cachedClients: make(map[string]*regionClients),
 	}
 }
 
@@ -47,61 +55,90 @@ func (s *OCIComputeService) init(ctx context.Context) error {
 	}
 
 	if settings.TenancyOCID == "" || settings.UserOCID == "" || settings.Fingerprint == "" ||
-		settings.PrivateKey == "" || settings.Region == "" || settings.CompartmentOCID == "" {
+		settings.PrivateKey == "" || settings.CompartmentOCID == "" {
 		return fmt.Errorf("incomplete OCI settings")
 	}
 
-	s.configProvider = common.NewRawConfigurationProvider(
-		settings.TenancyOCID,
-		settings.UserOCID,
-		settings.Region,
-		settings.Fingerprint,
-		settings.PrivateKey,
-		nil,
-	)
+	s.tenancyOCID = settings.TenancyOCID
+	s.userOCID = settings.UserOCID
+	s.fingerprint = settings.Fingerprint
+	s.privateKey = settings.PrivateKey
 	s.compartmentOCID = settings.CompartmentOCID
-
-	computeClient, err := core.NewComputeClientWithConfigurationProvider(s.configProvider)
-	if err != nil {
-		return fmt.Errorf("create compute client: %w", err)
-	}
-	s.computeClient = computeClient
-
-	virtualNetworkClient, err := core.NewVirtualNetworkClientWithConfigurationProvider(s.configProvider)
-	if err != nil {
-		return fmt.Errorf("create virtual network client: %w", err)
-	}
-	s.virtualNetworkClient = virtualNetworkClient
-
-	instanceAgentClient, err := computeinstanceagent.NewComputeInstanceAgentClientWithConfigurationProvider(s.configProvider)
-	if err != nil {
-		return fmt.Errorf("create instance agent client: %w", err)
-	}
-	s.instanceAgentClient = instanceAgentClient
-
 	s.initialized = true
 	return nil
 }
 
-func (s *OCIComputeService) GetComputeClient(ctx context.Context) (core.ComputeClient, error) {
+func (s *OCIComputeService) clientProvider(region string) common.ConfigurationProvider {
+	return common.NewRawConfigurationProvider(
+		s.tenancyOCID,
+		s.userOCID,
+		region,
+		s.fingerprint,
+		s.privateKey,
+		nil,
+	)
+}
+
+func (s *OCIComputeService) getOrCreateClients(ctx context.Context, region string) (*regionClients, error) {
 	if err := s.init(ctx); err != nil {
+		return nil, err
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if c, ok := s.cachedClients[region]; ok {
+		return c, nil
+	}
+
+	provider := s.clientProvider(region)
+
+	computeClient, err := core.NewComputeClientWithConfigurationProvider(provider)
+	if err != nil {
+		return nil, fmt.Errorf("create compute client for %s: %w", region, err)
+	}
+
+	virtualNetworkClient, err := core.NewVirtualNetworkClientWithConfigurationProvider(provider)
+	if err != nil {
+		return nil, fmt.Errorf("create virtual network client for %s: %w", region, err)
+	}
+
+	instanceAgentClient, err := computeinstanceagent.NewComputeInstanceAgentClientWithConfigurationProvider(provider)
+	if err != nil {
+		return nil, fmt.Errorf("create instance agent client for %s: %w", region, err)
+	}
+
+	c := &regionClients{
+		computeClient:        computeClient,
+		virtualNetworkClient: virtualNetworkClient,
+		instanceAgentClient:  instanceAgentClient,
+	}
+	s.cachedClients[region] = c
+	return c, nil
+}
+
+func (s *OCIComputeService) GetComputeClient(ctx context.Context, region string) (core.ComputeClient, error) {
+	c, err := s.getOrCreateClients(ctx, region)
+	if err != nil {
 		return core.ComputeClient{}, err
 	}
-	return s.computeClient, nil
+	return c.computeClient, nil
 }
 
-func (s *OCIComputeService) GetNetworkClient(ctx context.Context) (core.VirtualNetworkClient, error) {
-	if err := s.init(ctx); err != nil {
+func (s *OCIComputeService) GetNetworkClient(ctx context.Context, region string) (core.VirtualNetworkClient, error) {
+	c, err := s.getOrCreateClients(ctx, region)
+	if err != nil {
 		return core.VirtualNetworkClient{}, err
 	}
-	return s.virtualNetworkClient, nil
+	return c.virtualNetworkClient, nil
 }
 
-func (s *OCIComputeService) GetInstanceAgentClient(ctx context.Context) (computeinstanceagent.ComputeInstanceAgentClient, error) {
-	if err := s.init(ctx); err != nil {
+func (s *OCIComputeService) GetInstanceAgentClient(ctx context.Context, region string) (computeinstanceagent.ComputeInstanceAgentClient, error) {
+	c, err := s.getOrCreateClients(ctx, region)
+	if err != nil {
 		return computeinstanceagent.ComputeInstanceAgentClient{}, err
 	}
-	return s.instanceAgentClient, nil
+	return c.instanceAgentClient, nil
 }
 
 func (s *OCIComputeService) GetCompartmentOCID(ctx context.Context) (string, error) {

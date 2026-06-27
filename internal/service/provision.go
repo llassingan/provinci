@@ -39,6 +39,30 @@ func NewVPSProvisionService(
 	}
 }
 
+func (s *VPSProvisionService) vpsRegion(ctx context.Context, vpsID int64) (string, error) {
+	vps, err := s.vpsRepo.Get(ctx, vpsID)
+	if err != nil {
+		return "", fmt.Errorf("get vps: %w", err)
+	}
+	if vps == nil {
+		return "", fmt.Errorf("vps %d not found", vpsID)
+	}
+	if !vps.NetworkID.Valid {
+		return "", fmt.Errorf("vps has no network assigned")
+	}
+	network, err := s.networkRepo.Get(ctx, vps.NetworkID.Int64)
+	if err != nil {
+		return "", fmt.Errorf("get network: %w", err)
+	}
+	if network == nil {
+		return "", fmt.Errorf("network not found")
+	}
+	if network.Region == "" {
+		return "", fmt.Errorf("network has no region configured")
+	}
+	return network.Region, nil
+}
+
 func (s *VPSProvisionService) StartInstance(ctx context.Context, vpsID int64) error {
 	vps, err := s.vpsRepo.Get(ctx, vpsID)
 	if err != nil {
@@ -56,7 +80,12 @@ func (s *VPSProvisionService) StartInstance(ctx context.Context, vpsID int64) er
 		return fmt.Errorf("vps must be in stopped state to start, current: %s", vps.Status)
 	}
 
-	computeClient, err := s.computeService.GetComputeClient(ctx)
+	region, err := s.vpsRegion(ctx, vpsID)
+	if err != nil {
+		return err
+	}
+
+	computeClient, err := s.computeService.GetComputeClient(ctx, region)
 	if err != nil {
 		return fmt.Errorf("get compute client: %w", err)
 	}
@@ -101,7 +130,12 @@ func (s *VPSProvisionService) StopInstance(ctx context.Context, vpsID int64) err
 		return fmt.Errorf("vps must be in running state to stop, current: %s", vps.Status)
 	}
 
-	computeClient, err := s.computeService.GetComputeClient(ctx)
+	region, err := s.vpsRegion(ctx, vpsID)
+	if err != nil {
+		return err
+	}
+
+	computeClient, err := s.computeService.GetComputeClient(ctx, region)
 	if err != nil {
 		return fmt.Errorf("get compute client: %w", err)
 	}
@@ -146,7 +180,12 @@ func (s *VPSProvisionService) RestartInstance(ctx context.Context, vpsID int64) 
 		return fmt.Errorf("vps must be in running state to restart, current: %s", vps.Status)
 	}
 
-	computeClient, err := s.computeService.GetComputeClient(ctx)
+	region, err := s.vpsRegion(ctx, vpsID)
+	if err != nil {
+		return err
+	}
+
+	computeClient, err := s.computeService.GetComputeClient(ctx, region)
 	if err != nil {
 		return fmt.Errorf("get compute client: %w", err)
 	}
@@ -187,7 +226,12 @@ func (s *VPSProvisionService) ResetInstance(ctx context.Context, vpsID int64) er
 		return fmt.Errorf("vps must be in running or stopped state to reset, current: %s", vps.Status)
 	}
 
-	computeClient, err := s.computeService.GetComputeClient(ctx)
+	region, err := s.vpsRegion(ctx, vpsID)
+	if err != nil {
+		return err
+	}
+
+	computeClient, err := s.computeService.GetComputeClient(ctx, region)
 	if err != nil {
 		return fmt.Errorf("get compute client: %w", err)
 	}
@@ -228,7 +272,12 @@ func (s *VPSProvisionService) ResetPassword(ctx context.Context, vpsID int64, ne
 		return fmt.Errorf("vps must be running to reset password, current: %s", vps.Status)
 	}
 
-	instanceAgentClient, err := s.computeService.GetInstanceAgentClient(ctx)
+	region, err := s.vpsRegion(ctx, vpsID)
+	if err != nil {
+		return err
+	}
+
+	instanceAgentClient, err := s.computeService.GetInstanceAgentClient(ctx, region)
 	if err != nil {
 		return fmt.Errorf("get instance agent client: %w", err)
 	}
@@ -315,7 +364,7 @@ func (s *VPSProvisionService) GetFirewallRules(ctx context.Context, vpsID int64)
 		return nil, fmt.Errorf("network not found")
 	}
 
-	networkClient, err := s.computeService.GetNetworkClient(ctx)
+	networkClient, err := s.computeService.GetNetworkClient(ctx, network.Region)
 	if err != nil {
 		return nil, fmt.Errorf("get network client: %w", err)
 	}
@@ -415,7 +464,7 @@ func (s *VPSProvisionService) UpdateFirewallRules(ctx context.Context, vpsID int
 		return fmt.Errorf("network not found")
 	}
 
-	networkClient, err := s.computeService.GetNetworkClient(ctx)
+	networkClient, err := s.computeService.GetNetworkClient(ctx, network.Region)
 	if err != nil {
 		return fmt.Errorf("get network client: %w", err)
 	}

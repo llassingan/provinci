@@ -114,7 +114,7 @@ vcn_cidr_block   = %q
 subnet_cidr_block = %q
 display_name     = %q
 dns_label        = %q
-`, settings.Region, settings.CompartmentOCID, settings.TenancyOCID,
+`, network.Region, settings.CompartmentOCID, settings.TenancyOCID,
 		settings.UserOCID, settings.Fingerprint, keyPath,
 		network.CIDRVCN, network.CIDRSubnet, network.Name, safeDNSLabel(network.Name))
 
