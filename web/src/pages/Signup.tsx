@@ -1,6 +1,6 @@
-import { useState, type FormEvent } from "react";
-import { Link, useNavigate } from "react-router-dom";
-import { auth } from "../lib/api";
+import { useState, useEffect, type FormEvent } from "react";
+import { useNavigate } from "react-router-dom";
+import { auth, settings } from "../lib/api";
 
 export default function Signup(): JSX.Element {
   const [email, setEmail] = useState("");
@@ -8,7 +8,23 @@ export default function Signup(): JSX.Element {
   const [confirm, setConfirm] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [checking, setChecking] = useState(true);
   const navigate = useNavigate();
+
+  useEffect(() => {
+    let cancelled = false;
+    settings
+      .get()
+      .then(() => {
+        if (!cancelled) navigate("/dashboard", { replace: true });
+      })
+      .catch(() => {
+        if (!cancelled) setChecking(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [navigate]);
 
   const handleSubmit = async (e: FormEvent): Promise<void> => {
     e.preventDefault();
@@ -30,21 +46,25 @@ export default function Signup(): JSX.Element {
     setLoading(true);
     try {
       await auth.signup(email, password);
-      navigate("/dashboard");
+      navigate("/dashboard", { replace: true });
     } catch (err) {
-      if (err instanceof Error) {
-        if (err.message.includes("409")) {
-          setError("Admin account already exists.");
-        } else {
-          setError(err.message);
-        }
-      } else {
-        setError("An unexpected error occurred.");
+      if (err instanceof Error && err.message.includes("409")) {
+        navigate("/login", { replace: true });
+        return;
       }
+      setError(err instanceof Error ? err.message : "An unexpected error occurred.");
     } finally {
       setLoading(false);
     }
   };
+
+  if (checking) {
+    return (
+      <div className="flex h-screen items-center justify-center">
+        <div className="h-8 w-8 animate-spin rounded-full border-4 border-primary-200 border-t-primary-600" />
+      </div>
+    );
+  }
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-gray-50 px-4">
@@ -138,16 +158,6 @@ export default function Signup(): JSX.Element {
             </button>
           </form>
         </div>
-
-        <p className="mt-4 text-center text-sm text-gray-500">
-          Already have an account?{" "}
-          <Link
-            to="/login"
-            className="font-medium text-primary-600 hover:text-primary-500"
-          >
-            Log in
-          </Link>
-        </p>
       </div>
     </div>
   );

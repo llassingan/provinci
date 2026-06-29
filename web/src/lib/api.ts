@@ -18,6 +18,11 @@ async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
     throw new Error("Unauthorized");
   }
 
+  if (res.status === 423) {
+    const err = (await res.json().catch(() => ({ error: "Account locked" }))) as ApiError;
+    throw new Error(err.error ?? "Account locked");
+  }
+
   if (!res.ok) {
     const err = (await res.json().catch(() => ({ error: res.statusText }))) as ApiError;
     throw new Error(err.error ?? `HTTP ${res.status}`);

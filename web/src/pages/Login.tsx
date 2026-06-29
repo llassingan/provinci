@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import { auth } from "../lib/api";
 
 export default function Login(): JSX.Element {
@@ -27,12 +27,10 @@ export default function Login(): JSX.Element {
       await auth.login(email, password);
       navigate("/dashboard");
     } catch (err) {
-      if (err instanceof Error && err.message.includes("401")) {
-        setError("Invalid email or password.");
+      if (err instanceof Error) {
+        setError(err.message);
       } else {
-        setError(
-          err instanceof Error ? err.message : "An unexpected error occurred.",
-        );
+        setError("An unexpected error occurred.");
       }
     } finally {
       setLoading(false);
@@ -56,7 +54,13 @@ export default function Login(): JSX.Element {
 
         <div className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
           {error && (
-            <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+            <div
+              className={`mb-4 rounded-lg border px-4 py-3 text-sm ${
+                error.toLowerCase().includes("locked")
+                  ? "border-amber-200 bg-amber-50 text-amber-800"
+                  : "border-red-200 bg-red-50 text-red-700"
+              }`}
+            >
               {error}
             </div>
           )}
@@ -111,16 +115,6 @@ export default function Login(): JSX.Element {
             </button>
           </form>
         </div>
-
-        <p className="mt-4 text-center text-sm text-gray-500">
-          Don&apos;t have an account?{" "}
-          <Link
-            to="/signup"
-            className="font-medium text-primary-600 hover:text-primary-500"
-          >
-            Sign up
-          </Link>
-        </p>
       </div>
     </div>
   );
