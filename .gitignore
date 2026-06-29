@@ -38,3 +38,6 @@ Thumbs.db
 
 .opencode
 .sisyphus
+
+/api
+*.tsbuildinfo
