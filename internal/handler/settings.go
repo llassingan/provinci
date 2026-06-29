@@ -2,6 +2,7 @@ package handler
 
 import (
 	"encoding/json"
+	"log"
 	"net/http"
 	"strings"
 
@@ -38,9 +39,12 @@ func maskPrivateKey(key string) string {
 func (h *SettingsHandler) HandleGetSettings(w http.ResponseWriter, r *http.Request) {
 	s, err := h.repo.Get(r.Context())
 	if err != nil {
+		log.Printf("[DEBUG] get_settings: failed: %v", err)
 		writeError(w, http.StatusInternalServerError, "failed to load settings")
 		return
 	}
+	log.Printf("[DEBUG] get_settings: loaded (tenancy=%s region=%s compartment=%s has_key=%v)",
+		s.TenancyOCID, s.Region, s.CompartmentOCID, s.PrivateKey != "")
 	resp := settingsResponse{
 		ID:              s.ID,
 		TenancyOCID:     s.TenancyOCID,
@@ -93,13 +97,18 @@ func (h *SettingsHandler) HandleUpdateSettings(w http.ResponseWriter, r *http.Re
 	privateKey := strings.TrimSpace(req.PrivateKey)
 	if privateKey != "" && privateKey != "********" {
 		if !strings.Contains(privateKey, "-----BEGIN PRIVATE KEY-----") {
+			log.Printf("[DEBUG] update_settings: invalid private_key format")
 			writeError(w, http.StatusBadRequest, "private_key must contain -----BEGIN PRIVATE KEY-----")
 			return
 		}
 	}
 
+	log.Printf("[DEBUG] update_settings: tenancy=%q region=%q compartment=%q has_existing_key=%v has_new_key=%v",
+		req.TenancyOCID, req.Region, req.CompartmentOCID, privateKey == "" || privateKey == "********", privateKey != "" && privateKey != "********")
+
 	s, err := h.repo.Get(r.Context())
 	if err != nil {
+		log.Printf("[DEBUG] update_settings: get existing failed: %v", err)
 		writeError(w, http.StatusInternalServerError, "failed to load settings")
 		return
 	}
@@ -117,9 +126,12 @@ func (h *SettingsHandler) HandleUpdateSettings(w http.ResponseWriter, r *http.Re
 	}
 
 	if err := h.repo.Update(r.Context(), s); err != nil {
+		log.Printf("[DEBUG] update_settings: update failed: %v", err)
 		writeError(w, http.StatusInternalServerError, "failed to update settings")
 		return
 	}
+
+	log.Printf("[DEBUG] update_settings: updated successfully")
 
 	s, err = h.repo.Get(r.Context())
 	if err != nil {

@@ -13,6 +13,7 @@ import (
 	"vps-store/internal/config"
 	"vps-store/internal/db"
 	"vps-store/internal/handler"
+	"vps-store/internal/logger"
 	"vps-store/internal/repository"
 	"vps-store/internal/server"
 	"vps-store/internal/service"
@@ -35,9 +36,16 @@ func main() {
 		log.Fatalf("migrations: %v", err)
 	}
 
+	appLogger, err := logger.New(cfg.Dev, cfg.LogFile)
+	if err != nil {
+		log.Fatalf("logger: %v", err)
+	}
+	defer appLogger.Close()
+	appLogger.Info("starting provinci", "dev", cfg.Dev, "log_file", cfg.LogFile)
+
 	userRepo := repository.NewUserRepository(database)
 
-	authService, err := service.NewAuthService(userRepo, cfg.DBEncryptionKey)
+	authService, err := service.NewAuthService(userRepo, cfg)
 	if err != nil {
 		log.Fatalf("auth service: %v", err)
 	}
@@ -53,11 +61,11 @@ func main() {
 	networkRepo := repository.NewNetworkRepository(database)
 	templateRepo := repository.NewTemplateRepository(database)
 	templateHandler := handler.NewTemplateHandler(templateRepo)
-	networkService := service.NewNetworkService(settingsRepo, networkRepo, broker, "terraform")
+	networkService := service.NewNetworkService(settingsRepo, networkRepo, broker, "terraform", appLogger)
 	networkHandler := handler.NewNetworkHandler(networkService, networkRepo, settingsRepo, sseHandler, broker)
 
 	vpsRepo := repository.NewVPSRepository(database)
-	ociComputeService := service.NewOCIComputeService(settingsRepo)
+	ociComputeService := service.NewOCIComputeService(settingsRepo, appLogger)
 	vpsProvisionService := service.NewVPSProvisionService(ociComputeService, vpsRepo, networkRepo, templateRepo, broker, settingsRepo)
 	vpsHandler := handler.NewVPSHandler(vpsRepo, templateRepo, networkRepo, settingsRepo, vpsProvisionService)
 

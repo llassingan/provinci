@@ -3,6 +3,7 @@ package handler
 import (
 	"database/sql"
 	"encoding/json"
+	"log"
 	"net/http"
 	"strconv"
 
@@ -50,43 +51,57 @@ type createVPSRequest struct {
 func (h *VPSHandler) HandleCreateVPS(w http.ResponseWriter, r *http.Request) {
 	var req createVPSRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		log.Printf("[DEBUG] create_vps: invalid body: %v", err)
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
 
+	log.Printf("[DEBUG] create_vps: display_name=%q template_id=%d network_id=%d", req.DisplayName, req.TemplateID, req.NetworkID)
+
 	if req.DisplayName == "" {
+		log.Printf("[DEBUG] create_vps: display_name is empty")
 		writeError(w, http.StatusBadRequest, "display_name is required")
 		return
 	}
 
 	if req.NetworkID == 0 {
+		log.Printf("[DEBUG] create_vps: network_id is 0")
 		writeError(w, http.StatusBadRequest, "network_id is required")
 		return
 	}
 
 	network, err := h.networkRepo.Get(r.Context(), req.NetworkID)
 	if err != nil {
+		log.Printf("[DEBUG] create_vps: get network failed: %v", err)
 		writeError(w, http.StatusInternalServerError, "failed to load network")
 		return
 	}
 	if network == nil {
+		log.Printf("[DEBUG] create_vps: network %d not found", req.NetworkID)
 		writeError(w, http.StatusNotFound, "network not found")
 		return
 	}
 	if network.Status != "ready" {
+		log.Printf("[DEBUG] create_vps: network %d not ready (status=%s)", req.NetworkID, network.Status)
 		writeError(w, http.StatusBadRequest, "network is not ready for provisioning")
 		return
 	}
 
+	log.Printf("[DEBUG] create_vps: network %d is ready (region=%s)", req.NetworkID, network.Region)
+
 	template, err := h.tmplRepo.Get(r.Context(), req.TemplateID)
 	if err != nil {
+		log.Printf("[DEBUG] create_vps: get template failed: %v", err)
 		writeError(w, http.StatusInternalServerError, "failed to load template")
 		return
 	}
 	if template == nil {
+		log.Printf("[DEBUG] create_vps: template %d not found", req.TemplateID)
 		writeError(w, http.StatusNotFound, "template not found")
 		return
 	}
+
+	log.Printf("[DEBUG] create_vps: template %q loaded (shape=%s ocpu=%.1f mem=%.1f boot=%d)", template.Name, template.Shape, template.DefaultOCPU, template.DefaultMemory, template.BootVolumeSizeGB)
 
 	vps := &model.VPS{
 		DisplayName:      req.DisplayName,
@@ -114,10 +129,12 @@ func (h *VPSHandler) HandleCreateVPS(w http.ResponseWriter, r *http.Request) {
 
 	created, err := h.vpsRepo.Create(r.Context(), vps)
 	if err != nil {
+		log.Printf("[DEBUG] create_vps: repo.Create failed: %v", err)
 		writeError(w, http.StatusInternalServerError, "failed to create VPS")
 		return
 	}
 
+	log.Printf("[DEBUG] create_vps: created vps id=%d display_name=%q shape=%s ocpu=%.1f mem=%.1f", created.ID, created.DisplayName, created.Shape, created.OCPU, created.MemoryGB)
 	writeJSON(w, http.StatusOK, created)
 }
 

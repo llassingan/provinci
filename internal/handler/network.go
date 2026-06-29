@@ -2,6 +2,7 @@ package handler
 
 import (
 	"encoding/json"
+	"log"
 	"net/http"
 	"strconv"
 	"strings"
@@ -54,23 +55,30 @@ type createNetworkRequest struct {
 func (h *NetworkHandler) HandleCreateNetwork(w http.ResponseWriter, r *http.Request) {
 	var req createNetworkRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		log.Printf("[DEBUG] create_network: invalid body: %v", err)
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
 
 	req.Name = strings.TrimSpace(req.Name)
 	req.Region = strings.TrimSpace(req.Region)
+
+	log.Printf("[DEBUG] create_network: name=%q region=%q", req.Name, req.Region)
+
 	if req.Name == "" {
+		log.Printf("[DEBUG] create_network: name is empty")
 		writeError(w, http.StatusBadRequest, "name is required")
 		return
 	}
 	if req.Region == "" {
+		log.Printf("[DEBUG] create_network: region is empty")
 		writeError(w, http.StatusBadRequest, "region is required")
 		return
 	}
 
 	network, err := h.networkRepo.Create(r.Context(), req.Name, req.Region)
 	if err != nil {
+		log.Printf("[DEBUG] create_network: repo.Create failed: %v", err)
 		if strings.Contains(err.Error(), "maximum") {
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
@@ -79,6 +87,7 @@ func (h *NetworkHandler) HandleCreateNetwork(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
+	log.Printf("[DEBUG] create_network: created network id=%d name=%q region=%q status=%s", network.ID, network.Name, network.Region, network.Status)
 	writeJSON(w, http.StatusCreated, network)
 }
 

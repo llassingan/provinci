@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"vps-store/internal/logger"
 	"vps-store/internal/repository"
 	"vps-store/internal/sse"
 )
@@ -19,6 +20,7 @@ type NetworkService struct {
 	networkRepo  *repository.NetworkRepository
 	broker       *sse.EventBroker
 	terraformDir string
+	log          *logger.Logger
 }
 
 func NewNetworkService(
@@ -26,21 +28,26 @@ func NewNetworkService(
 	networkRepo *repository.NetworkRepository,
 	broker *sse.EventBroker,
 	terraformDir string,
+	log *logger.Logger,
 ) *NetworkService {
 	return &NetworkService{
 		settingsRepo: settingsRepo,
 		networkRepo:  networkRepo,
 		broker:       broker,
 		terraformDir: terraformDir,
+		log:          log,
 	}
 }
 
 func (s *NetworkService) ProvisionNetwork(ctx context.Context, networkID int64) error {
 	channel := fmt.Sprintf("network:%d", networkID)
 
+	s.log.Debug("provision_network_start", "network_id", networkID, "channel", channel)
+
 	defer func() {
 		if keyPath := filepath.Join(os.TempDir(), "oci-key.pem"); fileExists(keyPath) {
 			os.Remove(keyPath)
+			s.log.Debug("cleaned_up_temp_key", "path", keyPath)
 		}
 	}()
 
@@ -63,12 +70,16 @@ func (s *NetworkService) ProvisionNetwork(ctx context.Context, networkID int64) 
 	network, err := s.networkRepo.Get(ctx, networkID)
 	if err != nil || network == nil {
 		if network == nil {
+			s.log.Error("network_not_found", "network_id", networkID)
 			emitError("Network not found")
 			return fmt.Errorf("network %d not found", networkID)
 		}
+		s.log.Error("get_network_failed", "network_id", networkID, "error", err)
 		emitError("Failed to load network: " + err.Error())
 		return fmt.Errorf("get network: %w", err)
 	}
+
+	s.log.Debug("network_loaded", "network_id", networkID, "name", network.Name, "region", network.Region, "status", network.Status, "cidr_vcn", network.CIDRVCN, "cidr_subnet", network.CIDRSubnet)
 
 	if network.Status == "provisioning" {
 		emitError("Network is already provisioning")
@@ -82,8 +93,10 @@ func (s *NetworkService) ProvisionNetwork(ctx context.Context, networkID int64) 
 
 	emitStatus("loading_credentials", "Loading OCI settings")
 
+	s.log.Debug("loading_oci_settings")
 	settings, err := s.settingsRepo.Get(ctx)
 	if err != nil {
+		s.log.Error("load_settings_failed", "error", err)
 		s.networkRepo.UpdateStatus(ctx, networkID, "failed")
 		emitError("Failed to load settings: " + err.Error())
 		return fmt.Errorf("load settings: %w", err)
@@ -91,10 +104,13 @@ func (s *NetworkService) ProvisionNetwork(ctx context.Context, networkID int64) 
 
 	if settings.TenancyOCID == "" || settings.UserOCID == "" || settings.Fingerprint == "" ||
 		settings.PrivateKey == "" || settings.Region == "" || settings.CompartmentOCID == "" {
+		s.log.Error("incomplete_oci_settings", "has_tenancy", settings.TenancyOCID != "", "has_user", settings.UserOCID != "", "has_fingerprint", settings.Fingerprint != "", "has_private_key", settings.PrivateKey != "", "has_region", settings.Region != "", "has_compartment", settings.CompartmentOCID != "")
 		s.networkRepo.UpdateStatus(ctx, networkID, "failed")
 		emitError("Missing OCI credentials in settings")
 		return fmt.Errorf("incomplete OCI settings")
 	}
+
+	s.log.Debug("oci_settings_loaded", "region", settings.Region, "compartment_ocid", maskOCID(settings.CompartmentOCID), "tenancy_ocid", maskOCID(settings.TenancyOCID))
 
 	keyPath := filepath.Join(os.TempDir(), "oci-key.pem")
 	if err := os.WriteFile(keyPath, []byte(settings.PrivateKey), 0600); err != nil {
@@ -119,10 +135,13 @@ dns_label        = %q
 		network.CIDRVCN, network.CIDRSubnet, network.Name, safeDNSLabel(network.Name))
 
 	if err := os.WriteFile(tfvarsPath, []byte(tfvarsContent), 0644); err != nil {
+		s.log.Error("write_tfvars_failed", "path", tfvarsPath, "error", err)
 		s.networkRepo.UpdateStatus(ctx, networkID, "failed")
 		emitError("Failed to write terraform.tfvars: " + err.Error())
 		return fmt.Errorf("write tfvars: %w", err)
 	}
+
+	s.log.Debug("tfvars_written", "path", tfvarsPath, "region", network.Region)
 
 	steps := []struct {
 		step  string
@@ -137,20 +156,26 @@ dns_label        = %q
 
 	for _, st := range steps {
 		emitStatus(st.step, st.label)
+		s.log.Debug("running_terraform_step", "step", st.step, "cmd", st.cmd, "args", st.args)
 		if err := s.runTerraformCmd(st.cmd, st.args, channel); err != nil {
+			s.log.Error("terraform_step_failed", "step", st.step, "error", err)
 			s.networkRepo.UpdateStatus(ctx, networkID, "failed")
 			emitError(fmt.Sprintf("%s failed: %s", st.label, err.Error()))
 			return fmt.Errorf("%s: %w", st.step, err)
 		}
+		s.log.Debug("terraform_step_complete", "step", st.step)
 	}
 
 	emitStatus("parsing_outputs", "Parsing terraform outputs")
+	s.log.Debug("parsing_terraform_outputs")
 	vcnOCID, subnetOCID, err := s.parseOutputs()
 	if err != nil {
+		s.log.Error("parse_outputs_failed", "error", err)
 		s.networkRepo.UpdateStatus(ctx, networkID, "failed")
 		emitError("Failed to parse terraform outputs: " + err.Error())
 		return fmt.Errorf("parse outputs: %w", err)
 	}
+	s.log.Debug("terraform_outputs_parsed", "vcn_ocid", vcnOCID, "subnet_ocid", subnetOCID)
 
 	if err := s.networkRepo.UpdateProvisionResult(ctx, networkID, vcnOCID, subnetOCID); err != nil {
 		emitError("Failed to update network: " + err.Error())
@@ -287,4 +312,11 @@ func formatOutput(lines []string) string {
 		result += l + "\n"
 	}
 	return result
+}
+
+func maskOCID(ocid string) string {
+	if len(ocid) <= 20 {
+		return "***"
+	}
+	return ocid[:10] + "..." + ocid[len(ocid)-10:]
 }
