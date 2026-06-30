@@ -381,11 +381,9 @@ func safeDNSLabel(name string) string {
 			result = append(result, c)
 		} else if c >= 'A' && c <= 'Z' {
 			result = append(result, c+32)
-		} else if c == '-' || c == '_' {
-			result = append(result, c)
-		} else {
-			result = append(result, '-')
 		}
+		// skip hyphens, underscores, and all other non-alphanumeric chars —
+		// OCI dns_label must be strictly alphanumeric
 	}
 	if len(result) == 0 {
 		return "network"
