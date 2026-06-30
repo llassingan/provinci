@@ -197,6 +197,104 @@ dns_label        = %q
 	return nil
 }
 
+func (s *NetworkService) DestroyNetwork(ctx context.Context, networkID int64) error {
+	channel := fmt.Sprintf("network:%d", networkID)
+
+	s.log.Debug("destroy_network_start", "network_id", networkID)
+
+	network, err := s.networkRepo.Get(ctx, networkID)
+	if err != nil || network == nil {
+		if network == nil {
+			return fmt.Errorf("network %d not found", networkID)
+		}
+		return fmt.Errorf("get network: %w", err)
+	}
+
+	settings, err := s.settingsRepo.Get(ctx)
+	if err != nil {
+		return fmt.Errorf("load settings: %w", err)
+	}
+
+	keyPath := filepath.Join(os.TempDir(), "oci-key.pem")
+	if err := os.WriteFile(keyPath, []byte(settings.PrivateKey), 0600); err != nil {
+		return fmt.Errorf("write key: %w", err)
+	}
+	defer func() {
+		if fileExists(keyPath) {
+			os.Remove(keyPath)
+		}
+	}()
+
+	tfvarsPath := filepath.Join(s.terraformDir, "terraform.tfvars")
+	tfvarsContent := fmt.Sprintf(`region           = %q
+compartment_ocid = %q
+tenancy_ocid     = %q
+user_ocid        = %q
+fingerprint      = %q
+private_key_path = %q
+vcn_cidr_block   = %q
+subnet_cidr_block = %q
+display_name     = %q
+dns_label        = %q
+`, network.Region, settings.CompartmentOCID, settings.TenancyOCID,
+		settings.UserOCID, settings.Fingerprint, keyPath,
+		network.CIDRVCN, network.CIDRSubnet, network.Name, safeDNSLabel(network.Name))
+
+	if err := os.WriteFile(tfvarsPath, []byte(tfvarsContent), 0644); err != nil {
+		return fmt.Errorf("write tfvars: %w", err)
+	}
+
+	s.log.Debug("destroy_network_terraform", "network_id", networkID, "name", network.Name)
+	cmd := exec.Command("terraform", "destroy", "-auto-approve")
+	cmd.Dir = s.terraformDir
+
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return err
+	}
+	stderr, err := cmd.StderrPipe()
+	if err != nil {
+		return err
+	}
+
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+
+	scanner := bufio.NewScanner(stdout)
+	for scanner.Scan() {
+		line := scanner.Text()
+		s.broker.Publish(channel, sse.SSEEvent{
+			Type:      "status",
+			Status:    "destroying",
+			Step:      "terraform_output",
+			Message:   line,
+			Timestamp: time.Now().UnixMilli(),
+		})
+	}
+
+	errScanner := bufio.NewScanner(stderr)
+	var errOutput []string
+	for errScanner.Scan() {
+		line := errScanner.Text()
+		errOutput = append(errOutput, line)
+	}
+
+	if err := cmd.Wait(); err != nil {
+		s.log.Error("terraform_destroy_failed", "network_id", networkID, "error", err)
+		return fmt.Errorf("terraform destroy: %w\n%s", err, formatOutput(errOutput))
+	}
+
+	s.log.Debug("destroy_network_complete", "network_id", networkID)
+
+	if err := s.networkRepo.Delete(ctx, networkID); err != nil {
+		s.log.Error("destroy_network_db_delete_failed", "network_id", networkID, "error", err)
+		return fmt.Errorf("delete network record: %w", err)
+	}
+
+	return nil
+}
+
 func (s *NetworkService) runTerraformCmd(command string, args []string, channel string) error {
 	cmd := exec.Command(command, args...)
 	cmd.Dir = s.terraformDir

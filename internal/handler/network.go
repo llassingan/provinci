@@ -1,7 +1,9 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"strconv"
@@ -118,13 +120,25 @@ func (h *NetworkHandler) HandleDeleteNetwork(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	if err := h.networkRepo.Delete(r.Context(), id); err != nil {
-		if strings.Contains(err.Error(), "active VPS") {
-			writeError(w, http.StatusConflict, err.Error())
-			return
-		}
-		writeError(w, http.StatusInternalServerError, "failed to delete network")
+	vpsCount, err := h.networkRepo.CountVPS(r.Context(), id)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to check network usage")
 		return
+	}
+	if vpsCount > 0 {
+		writeError(w, http.StatusConflict, fmt.Sprintf("cannot delete network with %d active VPS instances", vpsCount))
+		return
+	}
+
+	if h.service != nil {
+		go func() {
+			log.Printf("[DEBUG] delete_network: destroying network %d in OCI", id)
+			if err := h.service.DestroyNetwork(context.Background(), id); err != nil {
+				log.Printf("[DEBUG] delete_network: destroy failed: %v", err)
+			} else {
+				log.Printf("[DEBUG] delete_network: network %d destroyed in OCI", id)
+			}
+		}()
 	}
 
 	w.WriteHeader(http.StatusNoContent)
@@ -138,10 +152,9 @@ func (h *NetworkHandler) HandleNetworkProvision(w http.ResponseWriter, r *http.R
 	}
 
 	go func() {
-		_ = h.service.ProvisionNetwork(r.Context(), id)
+		_ = h.service.ProvisionNetwork(context.Background(), id)
 	}()
 
-	w.WriteHeader(http.StatusAccepted)
 	writeJSON(w, http.StatusAccepted, map[string]string{"status": "network_provisioning_started"})
 }
 
