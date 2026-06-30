@@ -126,6 +126,22 @@
         state: restarted
         enabled: true
 
+    - name: Configure UFW
+      ufw:
+        rule: allow
+        port: "{{ item }}"
+        proto: tcp
+      loop:
+        - '22'
+        - '80'
+        - '443'
+
+    - name: Enable UFW
+      ufw:
+        state: enabled
+        policy: deny
+        direction: incoming
+
     - name: Create credentials directory
       file:
         path: /root/.vpsstore
