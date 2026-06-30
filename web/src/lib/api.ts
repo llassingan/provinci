@@ -98,6 +98,8 @@ export interface VPS {
   private_ip?: string;
   status: VPSStatus;
   initial_credentials?: string;
+  ssh_username?: string;
+  ssh_password?: string;
   created_at: string;
   updated_at: string;
 }
@@ -210,6 +212,10 @@ export const vps = {
       method: "POST",
       body: JSON.stringify({ password }),
     });
+  },
+
+  refreshIPs(id: number): Promise<VPS> {
+    return apiFetch<VPS>(`/vps/${id}/refresh-ips`, { method: "POST" });
   },
 
   getFirewall(id: number): Promise<FirewallRules> {

@@ -144,6 +144,7 @@ export default function VPSManage(): JSX.Element {
   const [instance, setInstance] = useState<VPS | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [refreshingIPs, setRefreshingIPs] = useState(false);
   const [activeTab, setActiveTab] = useState<Tab>("firewall");
 
   useEffect(() => {
@@ -166,6 +167,19 @@ export default function VPSManage(): JSX.Element {
     vps.get(numericId).then(setInstance).catch(() => {
       // silent refresh
     });
+  };
+
+  const handleRefreshIPs = async (): Promise<void> => {
+    if (!instance) return;
+    setRefreshingIPs(true);
+    try {
+      const updated = await vps.refreshIPs(instance.id);
+      setInstance(updated);
+    } catch {
+      // silent
+    } finally {
+      setRefreshingIPs(false);
+    }
   };
 
   // ---------- Loading / Error / Not Found ----------
@@ -229,7 +243,7 @@ export default function VPSManage(): JSX.Element {
       {/* Quick Info Row */}
       <div className="mb-6 grid gap-4 sm:grid-cols-4">
         {[
-          { label: "Public IP", value: instance.public_ip ?? "—" },
+          { label: "Public IP", value: instance.public_ip ?? "—", refreshable: true },
           { label: "Shape", value: instance.shape },
           { label: "OCPU", value: String(instance.ocpu) },
           { label: "Memory", value: `${instance.memory_gb} GB` },
@@ -241,8 +255,38 @@ export default function VPSManage(): JSX.Element {
             <dt className="text-xs font-medium uppercase tracking-wide text-gray-400">
               {info.label}
             </dt>
-            <dd className="mt-0.5 text-sm font-medium text-gray-900">
-              {info.value}
+            <dd className="mt-0.5 flex items-center gap-1.5 text-sm font-medium text-gray-900">
+              <span>{info.value}</span>
+              {"refreshable" in info && (
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    void handleRefreshIPs();
+                  }}
+                  disabled={refreshingIPs}
+                  className="rounded p-0.5 text-gray-400 hover:text-gray-600 disabled:opacity-50"
+                  title="Refresh IPs"
+                >
+                  {refreshingIPs ? (
+                    <Spinner />
+                  ) : (
+                    <svg
+                      className="h-3.5 w-3.5"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                      stroke="currentColor"
+                      strokeWidth={1.5}
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182"
+                      />
+                    </svg>
+                  )}
+                </button>
+              )}
             </dd>
           </div>
         ))}
