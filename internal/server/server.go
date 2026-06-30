@@ -65,7 +65,7 @@ func (s *Server) ListenAndServe(addr string) error {
 		Addr:         addr,
 		Handler:      s.router,
 		ReadTimeout:  15 * time.Second,
-		WriteTimeout: 15 * time.Second,
+		WriteTimeout: 45 * time.Second,
 		IdleTimeout:  60 * time.Second,
 	}
 	return s.httpServer.ListenAndServe()
