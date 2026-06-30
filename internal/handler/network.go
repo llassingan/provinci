@@ -131,14 +131,13 @@ func (h *NetworkHandler) HandleDeleteNetwork(w http.ResponseWriter, r *http.Requ
 	}
 
 	if h.service != nil {
-		go func() {
-			log.Printf("[DEBUG] delete_network: destroying network %d in OCI", id)
-			if err := h.service.DestroyNetwork(context.Background(), id); err != nil {
-				log.Printf("[DEBUG] delete_network: destroy failed: %v", err)
-			} else {
-				log.Printf("[DEBUG] delete_network: network %d destroyed in OCI", id)
-			}
-		}()
+		log.Printf("[DEBUG] delete_network: destroying network %d in OCI", id)
+		if err := h.service.DestroyNetwork(r.Context(), id); err != nil {
+			log.Printf("[DEBUG] delete_network: destroy failed: %v", err)
+			writeError(w, http.StatusInternalServerError, fmt.Sprintf("failed to destroy network: %v", err))
+			return
+		}
+		log.Printf("[DEBUG] delete_network: network %d destroyed in OCI", id)
 	}
 
 	w.WriteHeader(http.StatusNoContent)

@@ -245,6 +245,17 @@ dns_label        = %q
 	}
 
 	s.log.Debug("destroy_network_terraform", "network_id", networkID, "name", network.Name)
+
+	// Run terraform init first — the .terraform directory (plugins and lock file)
+	// is ephemeral in container environments and may not exist on restart.
+	initCmd := exec.Command("terraform", "init")
+	initCmd.Dir = s.terraformDir
+	if out, err := initCmd.CombinedOutput(); err != nil {
+		s.log.Error("destroy_network_init_failed", "network_id", networkID, "error", err, "output", string(out))
+		return fmt.Errorf("terraform init: %w\n%s", err, string(out))
+	}
+	s.log.Debug("destroy_network_init_complete", "network_id", networkID)
+
 	cmd := exec.Command("terraform", "destroy", "-auto-approve")
 	cmd.Dir = s.terraformDir
 
