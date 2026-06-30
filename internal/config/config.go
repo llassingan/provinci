@@ -17,6 +17,7 @@ type Config struct {
 	LogFile             string
 	LoginMaxAttempts    int
 	LoginLockoutMinutes int
+	APIURL              string
 }
 
 func Load() (*Config, error) {
@@ -35,6 +36,10 @@ func Load() (*Config, error) {
 
 	origins := parseOrigins(os.Getenv("CORS_ORIGINS"))
 	dev := strings.ToLower(os.Getenv("DEV")) == "true"
+	apiURL := os.Getenv("API_URL")
+	if apiURL == "" {
+		apiURL = "http://localhost:10000"
+	}
 
 	logFile := os.Getenv("LOG_FILE")
 	maxAttempts := parseIntEnv("LOGIN_MAX_ATTEMPTS", 5)
@@ -47,6 +52,7 @@ func Load() (*Config, error) {
 		LogFile:             logFile,
 		LoginMaxAttempts:    maxAttempts,
 		LoginLockoutMinutes: lockoutMinutes,
+		APIURL:              strings.TrimRight(apiURL, "/"),
 	}, nil
 }
 

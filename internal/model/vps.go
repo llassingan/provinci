@@ -18,6 +18,9 @@ type VPS struct {
 	PrivateIP          NullString `json:"private_ip"`
 	Status             string    `json:"status"`
 	InitialCredentials NullString `json:"initial_credentials"`
+	SSHPrivateKey      NullString `json:"-"`
+	SSHUsername        NullString `json:"ssh_username"`
+	SSHPassword        NullString `json:"ssh_password"`
 	CreatedAt          time.Time `json:"created_at"`
 	UpdatedAt          time.Time `json:"updated_at"`
 }

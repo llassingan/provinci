@@ -66,7 +66,7 @@ func main() {
 
 	vpsRepo := repository.NewVPSRepository(database)
 	ociComputeService := service.NewOCIComputeService(settingsRepo, appLogger)
-	vpsProvisionService := service.NewVPSProvisionService(ociComputeService, vpsRepo, networkRepo, templateRepo, broker, settingsRepo)
+	vpsProvisionService := service.NewVPSProvisionService(ociComputeService, vpsRepo, networkRepo, templateRepo, broker, settingsRepo, cfg.APIURL)
 	vpsHandler := handler.NewVPSHandler(vpsRepo, templateRepo, networkRepo, settingsRepo, vpsProvisionService)
 
 	srv := server.New(

@@ -2,9 +2,12 @@ package service
 
 import (
 	"context"
+	"crypto/rand"
 	"database/sql"
 	"fmt"
 	"log"
+	"math/big"
+	"strings"
 	"time"
 
 	"github.com/oracle/oci-go-sdk/v65/common"
@@ -23,6 +26,7 @@ type VPSProvisionService struct {
 	templateRepo    *repository.TemplateRepository
 	broker          *sse.EventBroker
 	settingsRepo    *repository.SettingsRepository
+	apiURL          string
 }
 
 func NewVPSProvisionService(
@@ -32,6 +36,7 @@ func NewVPSProvisionService(
 	templateRepo *repository.TemplateRepository,
 	broker *sse.EventBroker,
 	settingsRepo *repository.SettingsRepository,
+	apiURL string,
 ) *VPSProvisionService {
 	return &VPSProvisionService{
 		computeService: computeService,
@@ -40,6 +45,7 @@ func NewVPSProvisionService(
 		templateRepo:   templateRepo,
 		broker:         broker,
 		settingsRepo:   settingsRepo,
+		apiURL:         apiURL,
 	}
 }
 
@@ -101,6 +107,25 @@ func (s *VPSProvisionService) ProvisionVPS(ctx context.Context, vpsID int64) err
 		return fmt.Errorf("get compartment: %w", err)
 	}
 
+	emit("generating_keys", "provisioning", "Generating SSH key pair")
+	log.Printf("[DEBUG] provision_vps: vps %d generating SSH key pair", vpsID)
+
+	publicKey, privateKeyPEM, err := GenerateSSHKeyPair()
+	if err != nil {
+		s.vpsRepo.UpdateStatus(ctx, vpsID, "failed")
+		emit("error", "failed", "Failed to generate SSH keys: "+err.Error())
+		return fmt.Errorf("generate SSH key pair: %w", err)
+	}
+
+	log.Printf("[DEBUG] provision_vps: vps %d SSH key pair generated", vpsID)
+
+	cloudInitYAML := injectSSHKey(template.CloudInitYAML, publicKey)
+	cloudInitYAML = strings.ReplaceAll(cloudInitYAML, "API_HOST", s.apiURL)
+	cloudInitYAML = strings.ReplaceAll(cloudInitYAML, "INSTANCE_ID", fmt.Sprintf("%d", vpsID))
+	cloudInitYAML = strings.ReplaceAll(cloudInitYAML, "API_TOKEN", "")
+
+	log.Printf("[DEBUG] provision_vps: vps %d cloud-init prepared (len=%d)", vpsID, len(cloudInitYAML))
+
 	emit("launching_instance", "provisioning", "Launching OCI instance")
 	instanceID, err := s.computeService.LaunchInstance(ctx, LaunchInstanceParams{
 		Region:           network.Region,
@@ -111,7 +136,7 @@ func (s *VPSProvisionService) ProvisionVPS(ctx context.Context, vpsID int64) err
 		OCPU:             vps.OCPU,
 		MemoryGB:         vps.MemoryGB,
 		BootVolumeSizeGB: vps.BootVolumeSizeGB,
-		CloudInitYAML:    template.CloudInitYAML,
+		CloudInitYAML:    cloudInitYAML,
 	})
 	if err != nil {
 		s.vpsRepo.UpdateStatus(ctx, vpsID, "failed")
@@ -159,6 +184,23 @@ func (s *VPSProvisionService) ProvisionVPS(ctx context.Context, vpsID int64) err
 				vps.PrivateIP = model.NullString{NullString: sql.NullString{String: privateIP, Valid: true}}
 			}
 			log.Printf("[DEBUG] provision_vps: vps %d IPs retrieved public_ip=%s private_ip=%s", vpsID, publicIP, privateIP)
+
+		// Set up SSH credentials for customer delivery
+		if publicIP != "" && privateKeyPEM != "" {
+			emit("setting_up_ssh", "provisioning", "Creating SSH user")
+			sshUser := sanitizeUsername(vps.DisplayName)
+			sshPass := generatePassword(16)
+			log.Printf("[DEBUG] provision_vps: vps %d creating SSH user %q on %s", vpsID, sshUser, publicIP)
+
+			if sshErr := SSHCreateUser(publicIP, privateKeyPEM, sshUser, sshPass); sshErr != nil {
+				log.Printf("[DEBUG] provision_vps: vps %d SSH user creation failed: %v (continuing)", vpsID, sshErr)
+			} else {
+				vps.SSHPrivateKey = model.NullString{NullString: sql.NullString{String: privateKeyPEM, Valid: true}}
+				vps.SSHUsername = model.NullString{NullString: sql.NullString{String: sshUser, Valid: true}}
+				vps.SSHPassword = model.NullString{NullString: sql.NullString{String: sshPass, Valid: true}}
+				log.Printf("[DEBUG] provision_vps: vps %d SSH credentials saved user=%s", vpsID, sshUser)
+			}
+		}
 		}
 	}
 
@@ -575,6 +617,51 @@ func (s *VPSProvisionService) ResetPassword(ctx context.Context, vpsID int64, ne
 	return nil
 }
 
+func (s *VPSProvisionService) RefreshInstanceIPs(ctx context.Context, vpsID int64) error {
+	vps, err := s.vpsRepo.Get(ctx, vpsID)
+	if err != nil {
+		return fmt.Errorf("get vps: %w", err)
+	}
+	if vps == nil {
+		return fmt.Errorf("vps %d not found", vpsID)
+	}
+	if !vps.OCIInstanceID.Valid || vps.OCIInstanceID.String == "" {
+		return fmt.Errorf("vps has no OCI instance ID")
+	}
+
+	region, err := s.vpsRegion(ctx, vpsID)
+	if err != nil {
+		return fmt.Errorf("get region: %w", err)
+	}
+	compartmentOCID, err := s.computeService.GetCompartmentOCID(ctx)
+	if err != nil {
+		return fmt.Errorf("get compartment: %w", err)
+	}
+
+	publicIP, privateIP, err := s.computeService.GetInstanceIPs(ctx, region, vps.OCIInstanceID.String, compartmentOCID)
+	if err != nil {
+		return fmt.Errorf("get instance IPs: %w", err)
+	}
+
+	updated := false
+	if publicIP != "" && (!vps.PublicIP.Valid || vps.PublicIP.String != publicIP) {
+		vps.PublicIP = model.NullString{NullString: sql.NullString{String: publicIP, Valid: true}}
+		updated = true
+	}
+	if privateIP != "" && (!vps.PrivateIP.Valid || vps.PrivateIP.String != privateIP) {
+		vps.PrivateIP = model.NullString{NullString: sql.NullString{String: privateIP, Valid: true}}
+		updated = true
+	}
+
+	if updated {
+		if err := s.vpsRepo.Update(ctx, vps); err != nil {
+			return fmt.Errorf("update vps: %w", err)
+		}
+	}
+
+	return nil
+}
+
 func shellEscape(s string) string {
 	result := make([]byte, 0, len(s))
 	for i := 0; i < len(s); i++ {
@@ -827,4 +914,60 @@ func (s *VPSProvisionService) UpdateFirewallRules(ctx context.Context, vpsID int
 
 	log.Printf("[DEBUG] service_update_firewall: vps %d security list updated successfully", vpsID)
 	return nil
+}
+
+func injectSSHKey(cloudInitYAML string, publicKey string) string {
+	if strings.Contains(cloudInitYAML, "write_files:") {
+		return cloudInitYAML
+	}
+
+	indentedKey := ""
+	for _, line := range strings.Split(strings.TrimSpace(publicKey), "\n") {
+		if line != "" {
+			indentedKey += "      " + line + "\n"
+		}
+	}
+
+	sshBlock := fmt.Sprintf(`
+write_files:
+  - path: /root/.ssh/authorized_keys
+    content: |
+%s
+    permissions: '0600'
+    owner: root:root
+`, indentedKey)
+
+	return cloudInitYAML + sshBlock
+}
+
+func sanitizeUsername(name string) string {
+	result := make([]byte, 0, len(name))
+	for i := 0; i < len(name) && len(result) < 32; i++ {
+		c := name[i]
+		if (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') {
+			result = append(result, c)
+		} else if c >= 'A' && c <= 'Z' {
+			result = append(result, c+32)
+		} else if c == ' ' || c == '-' || c == '_' {
+			result = append(result, '_')
+		}
+	}
+	if len(result) == 0 {
+		return "vpsuser"
+	}
+	if result[0] >= '0' && result[0] <= '9' {
+		result = append([]byte{'u'}, result...)
+	}
+	return string(result)
+}
+
+const passwordChars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+
+func generatePassword(length int) string {
+	b := make([]byte, length)
+	for i := range b {
+		n, _ := rand.Int(rand.Reader, big.NewInt(int64(len(passwordChars))))
+		b[i] = passwordChars[n.Int64()]
+	}
+	return string(b)
 }

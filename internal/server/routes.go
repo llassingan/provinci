@@ -41,6 +41,7 @@ func (s *Server) mountRoutes() {
 	r.Post("/api/vps/{id}/terminate", s.vpsHandler.HandleTerminateVPS)
 		r.Get("/api/vps/{id}/firewall", s.vpsHandler.HandleGetFirewall)
 		r.Post("/api/vps/{id}/firewall", s.vpsHandler.HandleUpdateFirewall)
+		r.Post("/api/vps/{id}/refresh-ips", s.vpsHandler.HandleRefreshIPs)
 
 		if s.sseHandler != nil {
 			r.Get("/api/vps/{id}/events", s.sseHandler.HandleVPSEvents)

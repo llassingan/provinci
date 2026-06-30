@@ -2,16 +2,23 @@ package service
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/x509"
 	"encoding/base64"
 	"encoding/json"
+	"encoding/pem"
 	"fmt"
+	"net"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/oracle/oci-go-sdk/v65/common"
 	"github.com/oracle/oci-go-sdk/v65/computeinstanceagent"
 	"github.com/oracle/oci-go-sdk/v65/core"
 	"github.com/oracle/oci-go-sdk/v65/identity"
+	"golang.org/x/crypto/ssh"
 
 	"vps-store/internal/logger"
 	"vps-store/internal/repository"
@@ -390,4 +397,87 @@ func (s *OCIComputeService) TerminateInstance(ctx context.Context, region, insta
 	}
 	s.log.Debug("oci_instance_terminated", "instance_id", instanceID)
 	return nil
+}
+
+// GenerateSSHKeyPair generates an RSA 4096 key pair.
+// Returns the public key in OpenSSH authorized_keys format and the
+// private key in PEM format.
+func GenerateSSHKeyPair() (publicKey string, privateKeyPEM string, err error) {
+	key, err := rsa.GenerateKey(rand.Reader, 4096)
+	if err != nil {
+		return "", "", fmt.Errorf("generate RSA key: %w", err)
+	}
+
+	pub, err := ssh.NewPublicKey(&key.PublicKey)
+	if err != nil {
+		return "", "", fmt.Errorf("marshal public key: %w", err)
+	}
+	publicKey = string(ssh.MarshalAuthorizedKey(pub))
+
+	privBytes, err := x509.MarshalPKCS8PrivateKey(key)
+	if err != nil {
+		return "", "", fmt.Errorf("marshal private key: %w", err)
+	}
+	privateKeyPEM = string(pem.EncodeToMemory(&pem.Block{
+		Type:  "PRIVATE KEY",
+		Bytes: privBytes,
+	}))
+
+	return publicKey, privateKeyPEM, nil
+}
+
+// SSHCreateUser connects to an instance via SSH using the provided private key
+// and creates a new user with the given password.
+func SSHCreateUser(host string, privateKeyPEM string, username string, password string) error {
+	signer, err := ssh.ParsePrivateKey([]byte(privateKeyPEM))
+	if err != nil {
+		return fmt.Errorf("parse private key: %w", err)
+	}
+
+	config := &ssh.ClientConfig{
+		User: "root",
+		Auth: []ssh.AuthMethod{
+			ssh.PublicKeys(signer),
+		},
+		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
+		Timeout:         15 * time.Second,
+	}
+
+	addr := net.JoinHostPort(host, "22")
+	client, err := ssh.Dial("tcp", addr, config)
+	if err != nil {
+		return fmt.Errorf("ssh dial %s: %w", addr, err)
+	}
+	defer client.Close()
+
+	session, err := client.NewSession()
+	if err != nil {
+		return fmt.Errorf("new session: %w", err)
+	}
+	defer session.Close()
+
+	cmd := fmt.Sprintf(
+		"id -u %[1]s 2>/dev/null || useradd -m -s /bin/bash %[1]s && echo '%[1]s:%[2]s' | chpasswd",
+		shellEscapeTight(username),
+		shellEscapeTight(password),
+	)
+
+	if err := session.Run(cmd); err != nil {
+		return fmt.Errorf("useradd/chpasswd: %w", err)
+	}
+
+	return nil
+}
+
+func shellEscapeTight(s string) string {
+	result := make([]byte, 0, len(s)+8)
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if c == '\'' {
+			result = append(result, '\'', '\\', '\'', '\'')
+		} else {
+			result = append(result, c)
+		}
+	}
+	return string(result)
 }

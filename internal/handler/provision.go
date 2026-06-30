@@ -681,3 +681,36 @@ func (h *VPSHandler) HandleUpdateFirewall(w http.ResponseWriter, r *http.Request
 		"egress":  egress,
 	})
 }
+
+func (h *VPSHandler) HandleRefreshIPs(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	if err != nil {
+		log.Printf("[DEBUG] refresh_ips: invalid id: %v", err)
+		writeError(w, http.StatusBadRequest, "invalid VPS id")
+		return
+	}
+
+	log.Printf("[DEBUG] refresh_ips: vps_id=%d", id)
+
+	if h.provisionService == nil {
+		log.Printf("[DEBUG] refresh_ips: provisionService is nil")
+		writeError(w, http.StatusServiceUnavailable, "provisioning service not available")
+		return
+	}
+
+	if err := h.provisionService.RefreshInstanceIPs(r.Context(), id); err != nil {
+		log.Printf("[DEBUG] refresh_ips: vps %d refresh failed: %v", id, err)
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	vps, err := h.vpsRepo.Get(r.Context(), id)
+	if err != nil {
+		log.Printf("[DEBUG] refresh_ips: vps %d re-fetch failed: %v", id, err)
+		writeError(w, http.StatusInternalServerError, "failed to get updated VPS")
+		return
+	}
+
+	log.Printf("[DEBUG] refresh_ips: vps %d IPs refreshed public_ip=%s private_ip=%s", id, vps.PublicIP.String, vps.PrivateIP.String)
+	writeJSON(w, http.StatusOK, vps)
+}
