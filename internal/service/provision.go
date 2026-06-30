@@ -2,12 +2,15 @@ package service
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
+	"time"
 
 	"github.com/oracle/oci-go-sdk/v65/common"
 	"github.com/oracle/oci-go-sdk/v65/computeinstanceagent"
 	"github.com/oracle/oci-go-sdk/v65/core"
 
+	"vps-store/internal/model"
 	"vps-store/internal/repository"
 	"vps-store/internal/sse"
 )
@@ -39,6 +42,152 @@ func NewVPSProvisionService(
 	}
 }
 
+func (s *VPSProvisionService) ProvisionVPS(ctx context.Context, vpsID int64) error {
+	channel := fmt.Sprintf("vps:%d", vpsID)
+
+	emit := func(step, status, message string) {
+		s.broker.Publish(channel, sse.SSEEvent{
+			Type:    "status",
+			Status:  status,
+			Step:    step,
+			Message: message,
+		})
+	}
+
+	emit("fetching_vps", "provisioning", "Loading VPS details")
+
+	vps, err := s.vpsRepo.Get(ctx, vpsID)
+	if err != nil || vps == nil {
+		if vps == nil {
+			emit("error", "failed", "VPS not found")
+			return fmt.Errorf("vps %d not found", vpsID)
+		}
+		emit("error", "failed", "Failed to load VPS: "+err.Error())
+		return fmt.Errorf("get vps: %w", err)
+	}
+
+	if err := s.vpsRepo.UpdateStatus(ctx, vpsID, "provisioning"); err != nil {
+		emit("error", "failed", "Failed to update VPS status")
+		return fmt.Errorf("update status: %w", err)
+	}
+
+	if !vps.NetworkID.Valid {
+		s.vpsRepo.UpdateStatus(ctx, vpsID, "failed")
+		emit("error", "failed", "VPS has no network assigned")
+		return fmt.Errorf("vps has no network")
+	}
+
+	emit("loading_network", "provisioning", "Loading network details")
+	network, err := s.networkRepo.Get(ctx, vps.NetworkID.Int64)
+	if err != nil || network == nil {
+		s.vpsRepo.UpdateStatus(ctx, vpsID, "failed")
+		emit("error", "failed", "Failed to load network")
+		return fmt.Errorf("get network: %w", err)
+	}
+
+	emit("loading_template", "provisioning", "Loading template")
+	template, err := s.templateRepo.Get(ctx, vps.TemplateID)
+	if err != nil || template == nil {
+		s.vpsRepo.UpdateStatus(ctx, vpsID, "failed")
+		emit("error", "failed", "Failed to load template")
+		return fmt.Errorf("get template: %w", err)
+	}
+
+	compartmentOCID, err := s.computeService.GetCompartmentOCID(ctx)
+	if err != nil {
+		s.vpsRepo.UpdateStatus(ctx, vpsID, "failed")
+		emit("error", "failed", "Failed to get compartment: "+err.Error())
+		return fmt.Errorf("get compartment: %w", err)
+	}
+
+	emit("launching_instance", "provisioning", "Launching OCI instance")
+	instanceID, err := s.computeService.LaunchInstance(ctx, LaunchInstanceParams{
+		Region:           network.Region,
+		CompartmentOCID:  compartmentOCID,
+		SubnetOCID:       network.SubnetOCID,
+		DisplayName:      vps.DisplayName,
+		Shape:            vps.Shape,
+		OCPU:             vps.OCPU,
+		MemoryGB:         vps.MemoryGB,
+		BootVolumeSizeGB: vps.BootVolumeSizeGB,
+		CloudInitYAML:    template.CloudInitYAML,
+	})
+	if err != nil {
+		s.vpsRepo.UpdateStatus(ctx, vpsID, "failed")
+		emit("error", "failed", "Failed to launch instance: "+err.Error())
+		return fmt.Errorf("launch instance: %w", err)
+	}
+
+	vps.OCIInstanceID = model.NullString{NullString: sql.NullString{String: instanceID, Valid: true}}
+	vps.Status = "provisioning"
+	if err := s.vpsRepo.Update(ctx, vps); err != nil {
+		emit("error", "failed", "Failed to update VPS: "+err.Error())
+		return fmt.Errorf("update vps: %w", err)
+	}
+
+	emit("waiting_for_boot", "provisioning", "Waiting for instance to boot")
+
+	_, err = s.waitForRunning(ctx, vpsID, network.Region, instanceID)
+	if err != nil {
+		s.vpsRepo.UpdateStatus(ctx, vpsID, "failed")
+		emit("error", "failed", "Instance failed to start: "+err.Error())
+		return fmt.Errorf("wait for running: %w", err)
+	}
+
+	vps.OCIInstanceID = model.NullString{NullString: sql.NullString{String: instanceID, Valid: true}}
+	vps.Status = "running"
+
+	if err := s.vpsRepo.Update(ctx, vps); err != nil {
+		emit("error", "failed", "Failed to update VPS: "+err.Error())
+		return fmt.Errorf("update vps: %w", err)
+	}
+
+	emit("ready", "running", "VPS instance is ready")
+	s.broker.Publish(channel, sse.SSEEvent{
+		Type:    "status",
+		Status:  "running",
+		Step:    "ready",
+		Message: "VPS instance provisioned successfully",
+		Data: map[string]string{
+			"instance_id": instanceID,
+		},
+	})
+
+	return nil
+}
+
+func (s *VPSProvisionService) waitForRunning(ctx context.Context, vpsID int64, region, instanceID string) (*core.Instance, error) {
+	channel := fmt.Sprintf("vps:%d", vpsID)
+	deadline := time.Now().Add(5 * time.Minute)
+
+	for time.Now().Before(deadline) {
+		instance, err := s.computeService.GetInstance(ctx, region, instanceID)
+		if err != nil {
+			return nil, err
+		}
+
+		state := instance.LifecycleState
+
+		switch state {
+		case core.InstanceLifecycleStateRunning:
+			return instance, nil
+		case core.InstanceLifecycleStateTerminated, core.InstanceLifecycleStateTerminating:
+			return nil, fmt.Errorf("instance %s entered state %s", instanceID, state)
+		default:
+			s.broker.Publish(channel, sse.SSEEvent{
+				Type:      "status",
+				Status:    "provisioning",
+				Step:      "waiting_for_boot",
+				Message:   fmt.Sprintf("Instance state: %s", state),
+				Timestamp: time.Now().UnixMilli(),
+			})
+			time.Sleep(5 * time.Second)
+		}
+	}
+
+	return nil, fmt.Errorf("instance %s did not reach running state within 5 minutes", instanceID)
+}
+
 func (s *VPSProvisionService) vpsRegion(ctx context.Context, vpsID int64) (string, error) {
 	vps, err := s.vpsRepo.Get(ctx, vpsID)
 	if err != nil {
@@ -61,6 +210,24 @@ func (s *VPSProvisionService) vpsRegion(ctx context.Context, vpsID int64) (strin
 		return "", fmt.Errorf("network has no region configured")
 	}
 	return network.Region, nil
+}
+
+func (s *VPSProvisionService) VPSRegionForDelete(ctx context.Context, vpsID int64) (string, error) {
+	return s.vpsRegion(ctx, vpsID)
+}
+
+func (s *VPSProvisionService) TerminateInstance(ctx context.Context, vpsID int64, region, instanceID string) error {
+	if err := s.computeService.TerminateInstance(ctx, region, instanceID); err != nil {
+		return err
+	}
+	channel := fmt.Sprintf("vps:%d", vpsID)
+	s.broker.Publish(channel, sse.SSEEvent{
+		Type:    "status",
+		Status:  "terminated",
+		Step:    "terminated",
+		Message: "VPS instance terminated",
+	})
+	return nil
 }
 
 func (s *VPSProvisionService) StartInstance(ctx context.Context, vpsID int64) error {

@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"log"
@@ -135,6 +136,16 @@ func (h *VPSHandler) HandleCreateVPS(w http.ResponseWriter, r *http.Request) {
 	}
 
 	log.Printf("[DEBUG] create_vps: created vps id=%d display_name=%q shape=%s ocpu=%.1f mem=%.1f", created.ID, created.DisplayName, created.Shape, created.OCPU, created.MemoryGB)
+
+	if h.provisionService != nil {
+		go func() {
+			log.Printf("[DEBUG] provision_vps: starting provisioning for vps %d", created.ID)
+			if err := h.provisionService.ProvisionVPS(context.Background(), created.ID); err != nil {
+				log.Printf("[DEBUG] provision_vps: vps %d provisioning failed: %v", created.ID, err)
+			}
+		}()
+	}
+
 	writeJSON(w, http.StatusOK, created)
 }
 
@@ -169,6 +180,52 @@ func (h *VPSHandler) HandleGetVPS(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, vps)
 }
 
+func (h *VPSHandler) HandleTerminateVPS(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid VPS id")
+		return
+	}
+
+	vps, err := h.vpsRepo.Get(r.Context(), id)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to get VPS")
+		return
+	}
+	if vps == nil {
+		writeError(w, http.StatusNotFound, "VPS not found")
+		return
+	}
+
+	if vps.Status == "terminated" {
+		writeError(w, http.StatusConflict, "VPS is already terminated")
+		return
+	}
+
+	if vps.OCIInstanceID.Valid && vps.OCIInstanceID.String != "" && h.provisionService != nil {
+		region, err := h.provisionService.VPSRegionForDelete(r.Context(), id)
+		if err != nil {
+			log.Printf("[DEBUG] terminate_vps: cannot determine region for vps %d: %v", id, err)
+			writeError(w, http.StatusInternalServerError, "failed to determine VPS region")
+			return
+		}
+		go func() {
+			log.Printf("[DEBUG] terminate_vps: terminating OCI instance %s in region %s", vps.OCIInstanceID.String, region)
+			if err := h.provisionService.TerminateInstance(context.Background(), id, region, vps.OCIInstanceID.String); err != nil {
+				log.Printf("[DEBUG] terminate_vps: terminate failed: %v", err)
+			}
+		}()
+	}
+
+	if err := h.vpsRepo.UpdateStatus(r.Context(), id, "terminated"); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to terminate VPS")
+		return
+	}
+
+	log.Printf("[DEBUG] terminate_vps: vps %d terminated", id)
+	writeJSON(w, http.StatusOK, map[string]string{"status": "terminated"})
+}
+
 func (h *VPSHandler) HandleDeleteVPS(w http.ResponseWriter, r *http.Request) {
 	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
 	if err != nil {
@@ -186,11 +243,17 @@ func (h *VPSHandler) HandleDeleteVPS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.vpsRepo.UpdateStatus(r.Context(), id, "terminated"); err != nil {
+	if vps.Status != "terminated" && vps.Status != "failed" {
+		writeError(w, http.StatusConflict, "VPS must be terminated before deleting. Terminate it first.")
+		return
+	}
+
+	if err := h.vpsRepo.Delete(r.Context(), id); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to delete VPS")
 		return
 	}
 
+	log.Printf("[DEBUG] delete_vps: vps %d deleted from database", id)
 	w.WriteHeader(http.StatusNoContent)
 }
 
