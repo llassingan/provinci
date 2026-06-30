@@ -50,7 +50,7 @@ func seedTemplates(db *sql.DB, projectRoot string) error {
 		{"WordPress", "WordPress on Ubuntu with Nginx, PHP-FPM, MySQL", "wordpress", "wordpress.yaml", "VM.Standard.E4.Flex", 1, 8, 50},
 		{"Node.js", "Node.js on Ubuntu with Nginx reverse proxy", "nodejs", "nodejs.yaml", "VM.Standard.E4.Flex", 1, 8, 50},
 		{"Docker", "Docker on Ubuntu with Docker Compose", "docker", "docker.yaml", "VM.Standard.E4.Flex", 2, 8, 50},
-		{"Ubuntu", "Vanilla Ubuntu with essential tools", "ubuntu", "ubuntu.yaml", "VM.Standard.E4.Flex", 1, 4, 30},
+		{"Ubuntu", "Vanilla Ubuntu with essential tools", "ubuntu", "ubuntu.yaml", "VM.Standard.E4.Flex", 1, 4, 50},
 	}
 
 	for _, s := range seeds {
@@ -151,8 +151,8 @@ func seedVPS(db *sql.DB) error {
 	seeds := []row{
 		{"wp-client-acme", 1, 1, "VM.Standard.E4.Flex", 1, 8, 50, "ocid1.instance.dummy.wp1", "129.146.100.10", "10.0.1.100", "running", creds},
 		{"node-api-beta", 2, 1, "VM.Standard.E4.Flex", 2, 16, 50, "ocid1.instance.dummy.node1", "129.146.100.20", "10.0.1.101", "running", creds},
-		{"docker-runner-stg", 3, 2, "VM.Standard.E4.Flex", 2, 8, 30, "ocid1.instance.dummy.docker1", "129.146.100.30", "10.1.1.100", "stopped", creds},
-		{"ubuntu-devbox", 4, 2, "VM.Standard.E4.Flex", 1, 4, 30, "ocid1.instance.dummy.ubuntu1", "129.146.100.40", "10.1.1.101", "running", creds},
+		{"docker-runner-stg", 3, 2, "VM.Standard.E4.Flex", 2, 8, 50, "ocid1.instance.dummy.docker1", "129.146.100.30", "10.1.1.100", "stopped", creds},
+		{"ubuntu-devbox", 4, 2, "VM.Standard.E4.Flex", 1, 4, 50, "ocid1.instance.dummy.ubuntu1", "129.146.100.40", "10.1.1.101", "running", creds},
 	}
 
 	for _, s := range seeds {

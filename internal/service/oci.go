@@ -2,12 +2,16 @@ package service
 
 import (
 	"context"
+	"encoding/base64"
+	"encoding/json"
 	"fmt"
+	"strings"
 	"sync"
 
 	"github.com/oracle/oci-go-sdk/v65/common"
 	"github.com/oracle/oci-go-sdk/v65/computeinstanceagent"
 	"github.com/oracle/oci-go-sdk/v65/core"
+	"github.com/oracle/oci-go-sdk/v65/identity"
 
 	"vps-store/internal/logger"
 	"vps-store/internal/repository"
@@ -31,6 +35,7 @@ type regionClients struct {
 	computeClient        core.ComputeClient
 	virtualNetworkClient core.VirtualNetworkClient
 	instanceAgentClient  computeinstanceagent.ComputeInstanceAgentClient
+	identityClient       identity.IdentityClient
 }
 
 func NewOCIComputeService(settingsRepo *repository.SettingsRepository, log *logger.Logger) *OCIComputeService {
@@ -121,10 +126,17 @@ func (s *OCIComputeService) getOrCreateClients(ctx context.Context, region strin
 		return nil, fmt.Errorf("create instance agent client for %s: %w", region, err)
 	}
 
+	identityClient, err := identity.NewIdentityClientWithConfigurationProvider(provider)
+	if err != nil {
+		s.log.Error("create_identity_client_failed", "region", region, "error", err)
+		return nil, fmt.Errorf("create identity client for %s: %w", region, err)
+	}
+
 	c := &regionClients{
 		computeClient:        computeClient,
 		virtualNetworkClient: virtualNetworkClient,
 		instanceAgentClient:  instanceAgentClient,
+		identityClient:       identityClient,
 	}
 	s.cachedClients[region] = c
 	s.log.Debug("oci_clients_created", "region", region)
@@ -155,9 +167,164 @@ func (s *OCIComputeService) GetInstanceAgentClient(ctx context.Context, region s
 	return c.instanceAgentClient, nil
 }
 
+func (s *OCIComputeService) getIdentityClient(ctx context.Context, region string) (identity.IdentityClient, error) {
+	c, err := s.getOrCreateClients(ctx, region)
+	if err != nil {
+		return identity.IdentityClient{}, err
+	}
+	return c.identityClient, nil
+}
+
+// availabilityDomain returns the first availability domain name for the given
+// region. OCI AD names include a 4-character prefix (e.g., HgYx:ap-batam-1-AD-1)
+// that cannot be derived from the region string alone — we must call the API.
+func (s *OCIComputeService) availabilityDomain(ctx context.Context, region, compartmentOCID string) (string, error) {
+	idClient, err := s.getIdentityClient(ctx, region)
+	if err != nil {
+		return "", err
+	}
+
+	resp, err := idClient.ListAvailabilityDomains(ctx, identity.ListAvailabilityDomainsRequest{
+		CompartmentId: common.String(compartmentOCID),
+	})
+	if err != nil {
+		return "", fmt.Errorf("list availability domains: %w", err)
+	}
+	if len(resp.Items) == 0 {
+		return "", fmt.Errorf("no availability domains found in %s", region)
+	}
+
+	ad := *resp.Items[0].Name
+	s.log.Debug("oci_resolved_ad", "region", region, "ad", ad)
+	return ad, nil
+}
+
 func (s *OCIComputeService) GetCompartmentOCID(ctx context.Context) (string, error) {
 	if err := s.init(ctx); err != nil {
 		return "", err
 	}
 	return s.compartmentOCID, nil
+}
+
+type LaunchInstanceParams struct {
+	Region             string
+	CompartmentOCID    string
+	SubnetOCID         string
+	DisplayName        string
+	Shape              string
+	OCPU               float64
+	MemoryGB           float64
+	BootVolumeSizeGB   int
+	CloudInitYAML      string
+}
+
+func (s *OCIComputeService) LaunchInstance(ctx context.Context, params LaunchInstanceParams) (string, error) {
+	computeClient, err := s.GetComputeClient(ctx, params.Region)
+	if err != nil {
+		return "", fmt.Errorf("get compute client: %w", err)
+	}
+
+	ad, err := s.availabilityDomain(ctx, params.Region, params.CompartmentOCID)
+	if err != nil {
+		return "", fmt.Errorf("get availability domain: %w", err)
+	}
+	adPtr := common.String(ad)
+
+	s.log.Debug("oci_finding_image", "shape", params.Shape)
+	images, err := computeClient.ListImages(ctx, core.ListImagesRequest{
+		CompartmentId:           common.String(params.CompartmentOCID),
+		OperatingSystem:         common.String("Canonical Ubuntu"),
+		OperatingSystemVersion:  common.String("22.04"),
+		Shape:                   common.String(params.Shape),
+		SortBy:                  core.ListImagesSortByTimecreated,
+		SortOrder:               core.ListImagesSortOrderDesc,
+		Limit:                   common.Int(1),
+	})
+	if err != nil {
+		s.log.Error("oci_list_images_failed", "error", err)
+		return "", fmt.Errorf("list images: %w", err)
+	}
+	if len(images.Items) == 0 {
+		s.log.Error("oci_no_images_found", "shape", params.Shape)
+		return "", fmt.Errorf("no Ubuntu 22.04 image found for shape %s in %s", params.Shape, params.Region)
+	}
+
+	imageID := images.Items[0].Id
+	s.log.Debug("oci_image_found", "image_id", *imageID, "image_name", *images.Items[0].DisplayName)
+
+	userDataB64 := base64.StdEncoding.EncodeToString([]byte(params.CloudInitYAML))
+
+	s.log.Debug("oci_launching_instance", "display_name", params.DisplayName, "shape", params.Shape, "ad", ad, "subnet", maskOCID(params.SubnetOCID))
+
+	request := core.LaunchInstanceRequest{
+		LaunchInstanceDetails: core.LaunchInstanceDetails{
+			AvailabilityDomain: adPtr,
+			CompartmentId:      common.String(params.CompartmentOCID),
+			DisplayName:        common.String(params.DisplayName),
+			Shape:              common.String(params.Shape),
+			Metadata: map[string]string{
+				"user_data": userDataB64,
+			},
+			CreateVnicDetails: &core.CreateVnicDetails{
+				SubnetId:       common.String(params.SubnetOCID),
+				AssignPublicIp: common.Bool(true),
+			},
+			SourceDetails: core.InstanceSourceViaImageDetails{
+				ImageId:             imageID,
+				BootVolumeSizeInGBs: common.Int64(int64(params.BootVolumeSizeGB)),
+			},
+		},
+	}
+
+	if strings.Contains(params.Shape, ".Flex") {
+		request.ShapeConfig = &core.LaunchInstanceShapeConfigDetails{
+			Ocpus:       common.Float32(float32(params.OCPU)),
+			MemoryInGBs: common.Float32(float32(params.MemoryGB)),
+		}
+	}
+
+	if body, err := json.Marshal(request.LaunchInstanceDetails); err == nil {
+		s.log.Debug("oci_launch_request_body", "body", string(body))
+	}
+
+	response, err := computeClient.LaunchInstance(ctx, request)
+	if err != nil {
+		s.log.Error("oci_launch_instance_failed", "error", err)
+		return "", fmt.Errorf("launch instance: %w", err)
+	}
+
+	instanceID := *response.Instance.Id
+	s.log.Debug("oci_instance_launched", "instance_id", instanceID, "state", string(response.Instance.LifecycleState))
+	return instanceID, nil
+}
+
+func (s *OCIComputeService) GetInstance(ctx context.Context, region, instanceID string) (*core.Instance, error) {
+	computeClient, err := s.GetComputeClient(ctx, region)
+	if err != nil {
+		return nil, fmt.Errorf("get compute client: %w", err)
+	}
+	resp, err := computeClient.GetInstance(ctx, core.GetInstanceRequest{
+		InstanceId: common.String(instanceID),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("get instance: %w", err)
+	}
+	return &resp.Instance, nil
+}
+
+func (s *OCIComputeService) TerminateInstance(ctx context.Context, region, instanceID string) error {
+	computeClient, err := s.GetComputeClient(ctx, region)
+	if err != nil {
+		return fmt.Errorf("get compute client: %w", err)
+	}
+	s.log.Debug("oci_terminating_instance", "instance_id", instanceID, "region", region)
+	_, err = computeClient.TerminateInstance(ctx, core.TerminateInstanceRequest{
+		InstanceId: common.String(instanceID),
+	})
+	if err != nil {
+		s.log.Error("oci_terminate_instance_failed", "instance_id", instanceID, "error", err)
+		return fmt.Errorf("terminate instance: %w", err)
+	}
+	s.log.Debug("oci_instance_terminated", "instance_id", instanceID)
+	return nil
 }

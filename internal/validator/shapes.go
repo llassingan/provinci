@@ -21,7 +21,7 @@ type ShapeSpec struct {
 
 var allShapes = map[string]ShapeSpec{
 	"VM.Standard.E4.Flex":  {Name: "VM.Standard.E4.Flex", Processor: "AMD EPYC 7J13 (Milan)", MinOCPU: 1, MaxOCPU: 64, MinMemory: 1, MaxMemory: 1024, MaxNetwork: "40 Gbps", Description: "2.55 GHz · up to 64 OCPU · recommended for VPS"},
-	"VM.Standard.E5.Flex":  {Name: "VM.Standard.E5.Flex", Processor: "AMD EPYC 9J14 (Genoa)", MinOCPU: 1, MaxOCPU: 94, MinMemory: 1, MaxMemory: 1049, MaxNetwork: "40 Gbps", Description: "2.4 GHz · up to 94 OCPU · best price-performance"},
+	"VM.Standard.E5.Flex":  {Name: "VM.Standard.E5.Flex", Processor: "AMD EPYC 9J14 (Genoa)", MinOCPU: 1, MaxOCPU: 126, MinMemory: 1, MaxMemory: 1024, MaxNetwork: "40 Gbps", Description: "2.4 GHz · up to 126 OCPU · best price-performance"},
 	"VM.Standard.E6.Flex":  {Name: "VM.Standard.E6.Flex", Processor: "AMD EPYC 9J45", MinOCPU: 1, MaxOCPU: 126, MinMemory: 1, MaxMemory: 1454, MaxNetwork: "99 Gbps", Description: "2.7 GHz · up to 126 OCPU · newest AMD"},
 	"VM.Standard.E6.Ax.Flex": {Name: "VM.Standard.E6.Ax.Flex", Processor: "AMD EPYC 9J45", MinOCPU: 1, MaxOCPU: 94, MinMemory: 1, MaxMemory: 712, MaxNetwork: "99 Gbps", Description: "2.7 GHz · up to 94 OCPU · lower memory tier"},
 
@@ -53,7 +53,7 @@ var shapeGroups = []ShapeGroup{
 }
 
 const (
-	MinBootVolumeGB = 10
+	MinBootVolumeGB = 50
 	MaxBootVolumeGB = 200
 )
 
