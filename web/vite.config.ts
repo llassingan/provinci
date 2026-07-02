@@ -12,7 +12,25 @@ export default defineConfig(() => {
       port: 10001,
       allowedHosts: ['.llassingan.web.id'],
       proxy: {
-        '/api': apiTarget,
+        '/api': {
+          target: apiTarget,
+          changeOrigin: true,
+          proxyTimeout: 0,
+          configure: (proxy) => {
+            proxy.on('proxyReq', (proxyReq, req) => {
+              if (req.url?.includes('/events')) {
+                proxyReq.setHeader('Connection', 'keep-alive');
+              }
+            });
+            proxy.on('proxyRes', (proxyRes, req) => {
+              if (req.url?.includes('/events')) {
+                proxyRes.headers['cache-control'] = 'no-cache, no-transform';
+                proxyRes.headers['x-accel-buffering'] = 'no';
+                proxyRes.headers['connection'] = 'keep-alive';
+              }
+            });
+          },
+        },
       },
     },
   };
