@@ -1,7 +1,7 @@
 import { useState, type FormEvent, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { networks, settings, regions } from "../lib/api";
-import type { Network, RegionGroup } from "../lib/api";
+import type { Network, NetworkListResponse, RegionGroup } from "../lib/api";
 import { useSSE } from "../hooks/useSSE";
 import ProvisioningLog from "../components/ProvisioningLog";
 
@@ -16,6 +16,8 @@ export default function NewNetwork(): JSX.Element {
   const [error, setError] = useState("");
   const [showNoCredsGuard, setShowNoCredsGuard] = useState(false);
   const [checkingCredentials, setCheckingCredentials] = useState(true);
+  const [networkCount, setNetworkCount] = useState(0);
+  const [maxNetworks, setMaxNetworks] = useState(0);
 
   const navigate = useNavigate();
 
@@ -34,6 +36,10 @@ export default function NewNetwork(): JSX.Element {
         setCheckingCredentials(false);
       });
     regions.groups().then(setRegionGroups).catch(() => {});
+    networks.list().then((data: NetworkListResponse) => {
+      setNetworkCount(data.networks.length);
+      setMaxNetworks(data.max_networks);
+    }).catch(() => {});
   }, []);
 
   const { events, connected } = useSSE(
@@ -72,6 +78,10 @@ export default function NewNetwork(): JSX.Element {
         setError("Please select a region.");
         return;
       }
+      if (maxNetworks > 0 && networkCount >= maxNetworks) {
+        setError(`Maximum of ${maxNetworks} networks reached.`);
+        return;
+      }
 
       setCreating(true);
       setError("");
@@ -86,7 +96,7 @@ export default function NewNetwork(): JSX.Element {
         setCreating(false);
       }
     },
-    [name, region],
+    [name, region, maxNetworks, networkCount],
   );
 
   const handleProvision = useCallback(async (): Promise<void> => {
@@ -171,7 +181,18 @@ export default function NewNetwork(): JSX.Element {
       </h1>
       <p className="mb-6 text-sm text-gray-500">
         Create a virtual cloud network with automatic CIDR allocation
+        {maxNetworks > 0 && (
+          <span className="ml-2 text-xs text-gray-400">
+            ({networkCount} of {maxNetworks} created)
+          </span>
+        )}
       </p>
+
+      {maxNetworks > 0 && networkCount >= maxNetworks && (
+        <div className="mb-6 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
+          Maximum of {maxNetworks} networks reached. Delete an unused network to create a new one.
+        </div>
+      )}
 
       {error && (
         <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
@@ -356,7 +377,7 @@ export default function NewNetwork(): JSX.Element {
             </button>
             <button
               type="submit"
-              disabled={creating}
+              disabled={creating || (maxNetworks > 0 && networkCount >= maxNetworks)}
               className="rounded-lg bg-primary-600 px-6 py-2 text-sm font-medium text-white hover:bg-primary-700 disabled:cursor-not-allowed disabled:opacity-50"
             >
               {creating ? "Creating..." : "Create Network"}

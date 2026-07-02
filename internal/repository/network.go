@@ -17,7 +17,7 @@ func NewNetworkRepository(db *sql.DB) *NetworkRepository {
 	return &NetworkRepository{db: db}
 }
 
-const maxNetworks = 5
+const MaxNetworks = 5
 
 var cidrBlocks = [][2]string{
 	{"10.0.0.0/16", "10.0.1.0/24"},
@@ -50,7 +50,7 @@ func (r *NetworkRepository) allocateCIDRSlot(ctx context.Context) ([2]string, er
 		}
 	}
 
-	return [2]string{}, fmt.Errorf("all %d network slots are in use", maxNetworks)
+	return [2]string{}, fmt.Errorf("all %d network slots are in use", MaxNetworks)
 }
 
 func (r *NetworkRepository) Create(ctx context.Context, name, region string) (*model.Network, error) {
@@ -58,8 +58,8 @@ func (r *NetworkRepository) Create(ctx context.Context, name, region string) (*m
 	if err != nil {
 		return nil, fmt.Errorf("count networks: %w", err)
 	}
-	if count >= maxNetworks {
-		return nil, fmt.Errorf("maximum of %d networks reached", maxNetworks)
+	if count >= MaxNetworks {
+		return nil, fmt.Errorf("maximum of %d networks reached", MaxNetworks)
 	}
 
 	cidr, err := r.allocateCIDRSlot(ctx)

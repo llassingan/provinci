@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { networks } from "../lib/api";
-import type { Network } from "../lib/api";
+import type { Network, NetworkListResponse } from "../lib/api";
 
 function StatusBadge({ status }: { status: Network["status"] }): JSX.Element {
   const styles: Record<string, string> = {
@@ -46,6 +46,7 @@ function SkeletonCard(): JSX.Element {
 
 export default function Networks(): JSX.Element {
   const [networkList, setNetworkList] = useState<Network[]>([]);
+  const [maxNetworks, setMaxNetworks] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [provisioningIds, setProvisioningIds] = useState<Set<number>>(
@@ -58,8 +59,9 @@ export default function Networks(): JSX.Element {
     setError("");
     networks
       .list()
-      .then((data) => {
-        setNetworkList(data);
+      .then((data: NetworkListResponse) => {
+        setNetworkList(data.networks);
+        setMaxNetworks(data.max_networks);
       })
       .catch((err: unknown) => {
         setError(
@@ -91,8 +93,9 @@ export default function Networks(): JSX.Element {
       const poll = setInterval(async () => {
         try {
           const data = await networks.list();
-          setNetworkList(data);
-          const updated = data.find((n) => n.id === id);
+          setNetworkList(data.networks);
+          setMaxNetworks(data.max_networks);
+          const updated = data.networks.find((n) => n.id === id);
           if (updated && updated.status !== "provisioning") {
             clearInterval(poll);
             setProvisioningIds((prev) => {
@@ -137,6 +140,11 @@ export default function Networks(): JSX.Element {
           <p className="mt-1 text-sm text-gray-500">
             Manage your VCN and subnet configurations
           </p>
+          {maxNetworks > 0 && (
+            <p className="mt-1 text-xs text-gray-400">
+              {networkList.length} of {maxNetworks} networks created
+            </p>
+          )}
         </div>
         <div className="flex gap-3">
           <button
@@ -147,8 +155,22 @@ export default function Networks(): JSX.Element {
             Refresh
           </button>
           <Link
-            to="/networks/new"
-            className="inline-flex items-center gap-1.5 rounded-lg bg-primary-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-primary-700"
+            to={networkList.length >= maxNetworks && maxNetworks > 0 ? "#" : "/networks/new"}
+            onClick={(e) => {
+              if (networkList.length >= maxNetworks && maxNetworks > 0) {
+                e.preventDefault();
+              }
+            }}
+            className={`inline-flex items-center gap-1.5 rounded-lg px-4 py-2 text-sm font-medium transition-colors ${
+              networkList.length >= maxNetworks && maxNetworks > 0
+                ? "cursor-not-allowed bg-gray-300 text-gray-500"
+                : "bg-primary-600 text-white hover:bg-primary-700"
+            }`}
+            title={
+              networkList.length >= maxNetworks && maxNetworks > 0
+                ? `Maximum ${maxNetworks} networks reached`
+                : undefined
+            }
           >
             + Create Network
           </Link>

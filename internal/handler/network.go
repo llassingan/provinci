@@ -46,7 +46,10 @@ func (h *NetworkHandler) HandleListNetworks(w http.ResponseWriter, r *http.Reque
 		writeError(w, http.StatusInternalServerError, "failed to list networks")
 		return
 	}
-	writeJSON(w, http.StatusOK, networks)
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"networks":     networks,
+		"max_networks": repository.MaxNetworks,
+	})
 }
 
 type createNetworkRequest struct {

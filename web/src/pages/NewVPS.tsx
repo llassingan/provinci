@@ -45,7 +45,7 @@ export default function NewVPS(): JSX.Element {
     setLoadingNetworks(true);
     networks
       .list()
-      .then((data) => setNetworkList(data.filter((n) => n.status === "ready")))
+      .then((data) => setNetworkList(data.networks.filter((n) => n.status === "ready")))
       .catch(() => setNetworkList([]))
       .finally(() => setLoadingNetworks(false));
   }, []);

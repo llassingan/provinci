@@ -54,6 +54,11 @@ export interface Network {
   updated_at: string;
 }
 
+export interface NetworkListResponse {
+  networks: Network[];
+  max_networks: number;
+}
+
 export interface RegionItem {
   key: string;
   name: string;
@@ -295,8 +300,8 @@ export const regions = {
 };
 
 export const networks = {
-  list(): Promise<Network[]> {
-    return apiFetch<Network[]>("/networks");
+  list(): Promise<NetworkListResponse> {
+    return apiFetch<NetworkListResponse>("/networks");
   },
 
   get(id: number): Promise<Network> {
